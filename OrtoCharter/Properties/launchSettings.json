@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "OrtoCharter": {
+      "commandName": "Project",
+      "commandLineArgs": "C:\\Users\\oak\\Documents\\ortotest\\1024x1024.png"
+    }
+  }
+}
