@@ -19,16 +19,14 @@ namespace OrtoAnalyzer
 
 		public void Analyze()
 		{
-			//var files = new[] { Path.Combine(ortoFolderPath, "small.png") };
+			//var files = new[] { Path.Combine(ortoFolderPath, "643645,6719691,644669,6720683,test.png") };
+			//var files = new[] { Path.Combine(ortoFolderPath, "645693,6721707,646717,6722731.png") };
 			var files = Directory.GetFiles(ortoFolderPath, "*.png").Where(x => !x.Contains("analyzed"));
 
 			Parallel.ForEach(files, (file) =>
 			{
 				string analyzedFileName = GetAnalyzedFileName(file);
-				//if (!File.Exists(analyzedFileName))
-				{
-					AnalyzeSingle(file, analyzedFileName);
-				}
+				AnalyzeSingle(file, analyzedFileName);
 			});
 		}
 
@@ -37,171 +35,204 @@ namespace OrtoAnalyzer
 			return Path.Combine(Path.GetDirectoryName(sourceFilePath), Path.GetFileNameWithoutExtension(sourceFilePath) + "_analyzed.png");
 		}
 
-		private void AnalyzeSingle(string imageFilePath, string outputFilePath)
+		private IEnumerable<PointOfInterest> AnalyzeSingle(string imageFilePath, string outputFilePath)
 		{
 			const int RockSampleStep = 2; // 5x5
 			const int SurroundSampleStep = 10; // 21x21
-			const int LandClearStep = 5; // 11x11
-			//const double BlueGreenFactor = 0.93;
+			const int LandClearStep = 10; // 21x21 
+			const int TreeClearStep = 20; // 41x41
 			const double BrightnessFactorLow = 1.05;
 			const double BrightnessFactoryHigh = 1.08;
-			const double LandBrightnessLevel = 0.39;
+			const double LandBrightnessLevel = 0.37; // (100.0 / 255.0);
+			const double GreenBlueTreeBrightnessLevel = 0.30; // trigger level for green-blue-factor
+			const double GreenBlueTreeFactor = 1.09; // 9% more green than blue = tree
+			const int MinDangerSize = 2; // 2 pixels minimum danger size
+			const int MinRedLevelForDanger = 31; // if R < this number - no danger
+			const float MaxHueForDanger = 195.0f; // If Hue more than this number - no danger
+			const float HueDangerAreaLowMax = 170.0f;
+			const float HueDangerAreaHighMax = 130.0f;
+
+			var foundPoints = new List<PointOfInterest>();
 
 			using (var image = new Bitmap(Image.FromFile(imageFilePath)))
 			{
-				using (Bitmap output = (Bitmap)image.Clone())
+				Color ColorLand = Color.Black;
+				Color ColorDangerHigh = Color.Red;
+				Color ColorDangerLow = Color.DarkRed;
+				Color ColorDangerAreaHigh = Color.Yellow;
+				Color ColorDangerAreaLow = Color.Brown;
+				Color ColorPOI = Color.Green;
+				Color ColorTree = Color.DarkGreen;
+
+				// Copy image into color array to avoid many calls to SetPixel() (it's slow)
+				var imageArray = new Color[image.Width, image.Height];
+				for (int x = 0; x < image.Width; x++)
+					for (int y = 0; y < image.Height; y++)
+						imageArray[x, y] = image.GetPixel(x, y);
+				var width = image.Width;
+				var height = image.Height;
+				var analyzeArray = new Color[image.Width, image.Height];
+
+				// The algorithm
+				for (int x = 0; x < width; x++)
 				{
-					Color Land = Color.Black;
-					Color DangerHigh = Color.Red;
-					Color DangerLow = Color.Yellow;
-					Color Waypoint = Color.Magenta;
-
-					var imageArray = new Color[image.Width, image.Height];
-					for (int x = 0; x < image.Width; x++)
-						for (int y = 0; y < image.Height; y++)
-							imageArray[x, y] = image.GetPixel(x, y);
-					var width = image.Width;
-					var height = image.Height;
-					var analyzeArray = new Color[image.Width, image.Height];
-
-					for (int x = 0; x < width; x++)
+					for (int y = 0; y < height; y++)
 					{
-						for (int y = 0; y < height; y++)
+						// Could already be filled in as land/tree - if so, it can't be a 'danger', but it can trigger 'more land' to be filled
+						bool alreadyLandOrTree = analyzeArray[x, y] != Color.Empty;
+
+						Color pixelColor = GetAveragePixel(imageArray, x, y, 0, width, height);
+
+						Color dangerColor = Color.Empty;
+						int fillAroundStep = 0;
+
+						// Is this (probably) a tree?
+						if (pixelColor.GetBrightness() >= GreenBlueTreeBrightnessLevel && (pixelColor.G / pixelColor.B) > GreenBlueTreeFactor)
 						{
-							Color pixelColor = GetAveragePixel(imageArray, x, y, 0, width, height);
+							fillAroundStep = TreeClearStep;
+							dangerColor = ColorTree;
+						}
+						// Is this (probably) land?
+						else if (pixelColor.GetBrightness() >= LandBrightnessLevel) // || sampleBrightness >= LandBrightnessLevel)
+						{
+							fillAroundStep = LandClearStep;
+							dangerColor = ColorLand;
+						}
+						// Maybe water? (Don't check here if pixel already covered by land/tree)
+						else if (!alreadyLandOrTree) 
+						{
+							fillAroundStep = 0;
+
 							Color sample = GetAveragePixel(imageArray, x, y, RockSampleStep, width, height);
-							float sampleBrightness = sample.GetBrightness();
+							float sampleHue = sample.GetHue();
 
-							Color dangerColor = Color.Transparent;
-
-							// Is this (probably) land?
-							if (pixelColor.GetBrightness() >= LandBrightnessLevel || sampleBrightness >= LandBrightnessLevel)
+							if (sampleHue < HueDangerAreaHighMax)
 							{
-								dangerColor = Land;
+								dangerColor = ColorDangerAreaHigh;
 							}
-							else
+							else if (sampleHue < HueDangerAreaLowMax)
+							{
+								dangerColor = ColorDangerAreaLow;
+							}
+							else if (/*sample.R > MinRedLevelForDanger && */sampleHue < MaxHueForDanger)
 							{
 								Color sample2 = GetAveragePixel(imageArray, x, y, SurroundSampleStep, width, height);
 
-								// Brightness High trigger
-								float brightnessFactor = sampleBrightness / sample2.GetBrightness();
+								// Brightness High/Low triggers for hidden rocks in water
+								float brightnessFactor = sample.GetBrightness() / sample2.GetBrightness();
 								if (brightnessFactor > BrightnessFactoryHigh)
 								{
-									dangerColor = DangerHigh;
+									dangerColor = ColorDangerHigh;
 								}
 								else if (brightnessFactor > BrightnessFactorLow)
 								{
-									dangerColor = DangerLow;
+									dangerColor = ColorDangerLow;
 								}
-
-								// Green/Blue factor checking
-								/*
-								float greenBlueFactor = sample.G / sample.B;
-
-								bool trigGreenBlue =  > BlueGreenFactor;
-								*/
 							}
+						}
 
-							// Is anything identified?
-							if (dangerColor != Color.Transparent)
+						// Is anything identified? Fill the box (or just a pixel if step = 0)
+						if (dangerColor != Color.Empty)
+						{
+							int cxBegin = Math.Max(0, x - fillAroundStep);
+							int cxEnd = Math.Min(width - 1, x + fillAroundStep);
+							int cyBegin = Math.Max(0, y - fillAroundStep);
+							int cyEnd = Math.Min(height - 1, y + fillAroundStep);
+
+							for (int cx = cxBegin; cx <= cxEnd; cx++)
 							{
-								analyzeArray[x, y] = dangerColor;
+								for (int cy = cyBegin; cy <= cyEnd; cy++)
+								{
+									analyzeArray[cx, cy] = dangerColor;
+								}
 							}
 						}
 					}
+				}
 
-					// Remove stuff close to 'land'
-					var landFilterArray = (Color[,])analyzeArray.Clone();
+				// Build coordinate output
+				var coordArray = (Color[,])analyzeArray.Clone();
+				try
+				{
+					string[] parts = Path.GetFileNameWithoutExtension(imageFilePath).Split(',');
+					int upperLeftNorth = int.Parse(parts[3], CultureInfo.InvariantCulture);
+					int upperLeftEast = int.Parse(parts[0], CultureInfo.InvariantCulture);
+
 					for (int x = 0; x < width; x++)
 					{
 						for (int y = 0; y < height; y++)
 						{
-							if (landFilterArray[x, y] == Land)
+							if (coordArray[x,y] != Color.Empty)
 							{
-								int cxBegin = Math.Max(0, x - LandClearStep);
-								int cxEnd = Math.Min(width, x + LandClearStep);
-								int cyBegin = Math.Max(0, y - LandClearStep);
-								int cyEnd = Math.Min(height, y + LandClearStep);
+								// Found something, find the pixel-size (area) of it
+								int size = Utils.FindSize(coordArray, x, y, out int centerX, out int centerY, out HashSet<Color> foundColors, (color) => color == ColorDangerHigh || color == ColorDangerLow);
 
-								for (int cx = cxBegin; cx < cxEnd; cx++)
+								// Is this danger 'large enough' ?
+								if (size >= MinDangerSize)
 								{
-									for (int cy = cyBegin; cy < cyEnd; cy++)
+									// Add waypoint 
+									var foundThing = new PointOfInterest();
+
+									foundThing.CenterPixelX = centerX;
+									foundThing.CenterPixelY = centerY;
+
+									if (foundColors.Contains(ColorDangerHigh))
 									{
-										analyzeArray[cx, cy] = Color.Transparent;
+										foundThing.ItemType = ItemType.DangerHigh;
 									}
-								}
-							}
-						}
-					}
-
-					// Remove single-pixel dangers
-					for (int x = 1; x < width - 1; x++)
-					{
-						for (int y = 1; y < height - 1; y++)
-						{
-							if (analyzeArray[x, y] != Color.Transparent)
-							{
-								bool foundAnother = false;
-								for (int xc = x - 1; xc <= x + 1 && !foundAnother; xc++)
-								{
-									for (int yc = y - 1; yc <= y + 1 && !foundAnother; yc++)
+									else if (foundColors.Contains(ColorDangerLow))
 									{
-										if (xc != x && yc != y && analyzeArray[xc, yc] != Color.Transparent)
-											foundAnother = true;
+										foundThing.ItemType = ItemType.DangerLow;
 									}
-								}
+									else if (foundColors.Contains(ColorLand))
+									{
+										foundThing = null;
+									}
+									else
+									{
+										throw new Exception("Unknown found color");
+									}
+									foundThing.SetSweRef99TM(upperLeftNorth - (centerY / 4.0), upperLeftEast + (centerX / 4.0));
 
-								// Remove danger single-pixel
-								if (!foundAnother)
-								{
-									analyzeArray[x, y] = imageArray[x, y];
-								}
-							}
-						}
-					}
-
-					// Build coordinate output
-					try
-					{
-						string[] parts = Path.GetFileNameWithoutExtension(imageFilePath).Split(',');
-						int upperLeftNorth = int.Parse(parts[3], CultureInfo.InvariantCulture);
-						int upperLeftEast = int.Parse(parts[0], CultureInfo.InvariantCulture);
-						for (int x = 0; x < width; x++)
-						{
-							for (int y = 0; y < height; y++)
-							{
-								if (analyzeArray[x,y] != Color.Transparent)
-								{
-
+									foundPoints.Add(foundThing);
 								}
 							}
 						}
 					}
-					catch
-					{
-						// Just skip outputting coordinates for now
-						// TODO: Crash
-					}
-
-
-					// Write the result file
-					for (int x = 0; x < image.Width; x++)
-					{
-						for (int y = 0; y < image.Height; y++)
-						{
-							Color outputColor = analyzeArray[x, y];
-							if (outputColor == Color.Transparent)
-							{
-								outputColor = imageArray[x, y];
-							}
-							output.SetPixel(x, y, outputColor);
-						}
-					}
-
-					output.Save(outputFilePath, System.Drawing.Imaging.ImageFormat.Png);
 				}
+				catch
+				{
+					// Just skip outputting coordinates for now
+					// TODO: Crash
+				}
+
+				// Write the result file
+
+				// Overlay 'analyzed' image on top of original image
+				for (int x = 0; x < image.Width; x++)
+				{
+					for (int y = 0; y < image.Height; y++)
+					{
+						Color outputColor = analyzeArray[x, y];
+						if (outputColor != Color.Empty)
+						{
+							image.SetPixel(x, y, outputColor);
+						}
+					}
+				}
+				// Set Waypoint pixels
+				foreach (var stuff in foundPoints)
+				{
+					image.SetPixel(stuff.CenterPixelX, stuff.CenterPixelY, ColorPOI);
+				}
+
+				image.Save(outputFilePath, System.Drawing.Imaging.ImageFormat.Png);
 			}
+
+			return foundPoints;
 		}
+
+
 
 		public enum ItemType
 		{
@@ -209,17 +240,20 @@ namespace OrtoAnalyzer
 			DangerLow
 		}
 
-		public class FoundStuff
+		public class PointOfInterest
 		{
-			public void SetSweRef99TM(int north, int east)
+			public void SetSweRef99TM(double north, double east)
 			{
 				GridCoordinate gridCoordinate = new GridCoordinate { Projection = Shorthand.Geodesy.Projections.SwedishProjections.SWEREF99TM, X = east, Y = north };
 				Coordinate = GaussKruger.GridToGeodetic(gridCoordinate);
 			}
 
-			GeodeticCoordinate Coordinate { get; set; }
+			public GeodeticCoordinate Coordinate { get; set; }
 
-			ItemType ItemType { get; set; }
+			public ItemType ItemType { get; set; }
+
+			public int CenterPixelX { get; set; }
+			public int CenterPixelY { get; set; }
 			
 		}
 
