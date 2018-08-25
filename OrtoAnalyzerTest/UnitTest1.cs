@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Linq;
 using Xunit;
 
 namespace OrtoAnalyzerTest
@@ -28,11 +29,13 @@ namespace OrtoAnalyzerTest
 				int x = 0;
 				int y = 1;
 
-				int size = OrtoAnalyzer.Utils.FindSize(pixelArray, x, y, out int centerX, out int centerY, out var foundColors, (color) => color != Color.Empty);
+				int size = OrtoAnalyzer.Utils.FindSizeAndRemove(pixelArray, x, y, out int centerX, out int centerY, out var foundColors, out var outsideColors, (color) => color != Color.Empty);
 
 				Assert.Equal(7, size);
 				Assert.Equal(1, centerX);
 				Assert.Equal(1, centerY);
+
+				Assert.Equal(Color.Empty, outsideColors.Single());
 			}
 
 			// Run test on empty area
@@ -40,11 +43,13 @@ namespace OrtoAnalyzerTest
 				int x = 2;
 				int y = 1;
 
-				int size = OrtoAnalyzer.Utils.FindSize(pixelArray, x, y, out int centerX, out int centerY, out var foundColors, (color) => color != Color.Empty);
+				int size = OrtoAnalyzer.Utils.FindSizeAndRemove(pixelArray, x, y, out int centerX, out int centerY, out var foundColors, out var outsideColors, (color) => color != Color.Empty);
 
 				Assert.Equal(0, size);
 				Assert.Equal(x, centerX);
 				Assert.Equal(y, centerY);
+
+				Assert.Equal(Color.Empty, outsideColors.Single());
 			}
 		}
 	}

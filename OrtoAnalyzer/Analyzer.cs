@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Shorthand.Geodesy;
+using System.Collections.Concurrent;
 
 namespace OrtoAnalyzer
 {
@@ -17,17 +18,25 @@ namespace OrtoAnalyzer
 			ortoFolderPath = _ortoFolderPath;
 		}
 
-		public void Analyze()
+		public IEnumerable<PointOfInterest> Analyze()
 		{
 			//var files = new[] { Path.Combine(ortoFolderPath, "643645,6719691,644669,6720683,test.png") };
 			//var files = new[] { Path.Combine(ortoFolderPath, "645693,6721707,646717,6722731.png") };
 			var files = Directory.GetFiles(ortoFolderPath, "*.png").Where(x => !x.Contains("analyzed"));
 
+			var pointsOfInterestBag = new ConcurrentBag<PointOfInterest>();
+
 			Parallel.ForEach(files, (file) =>
 			{
 				string analyzedFileName = GetAnalyzedFileName(file);
-				AnalyzeSingle(file, analyzedFileName);
+				var result = AnalyzeSingle(file, analyzedFileName);
+				foreach (var item in result)
+				{
+					pointsOfInterestBag.Add(item);
+				}
 			});
+
+			return pointsOfInterestBag;
 		}
 
 		private static string GetAnalyzedFileName(string sourceFilePath)
@@ -39,30 +48,30 @@ namespace OrtoAnalyzer
 		{
 			const int RockSampleStep = 2; // 5x5
 			const int SurroundSampleStep = 10; // 21x21
-			const int LandClearStep = 10; // 21x21 
-			const int TreeClearStep = 20; // 41x41
 			const double BrightnessFactorLow = 1.05;
 			const double BrightnessFactoryHigh = 1.08;
-			const double LandBrightnessLevel = 0.37; // (100.0 / 255.0);
-			const double GreenBlueTreeBrightnessLevel = 0.30; // trigger level for green-blue-factor
-			const double GreenBlueTreeFactor = 1.09; // 9% more green than blue = tree
+			const double LandBrightnessLevel = 0.38;
 			const int MinDangerSize = 2; // 2 pixels minimum danger size
 			const int MinRedLevelForDanger = 31; // if R < this number - no danger
 			const float MaxHueForDanger = 195.0f; // If Hue more than this number - no danger
-			const float HueDangerAreaLowMax = 170.0f;
+			const float HueDangerAreaLowMax = 166.0f;
 			const float HueDangerAreaHighMax = 130.0f;
+
+			Color ColorSafe = Color.FromArgb(255, 0, 220);
 
 			var foundPoints = new List<PointOfInterest>();
 
 			using (var image = new Bitmap(Image.FromFile(imageFilePath)))
 			{
-				Color ColorLand = Color.Black;
+				Color ColorLandOrSeagull = Color.Black;
+				Color ColorLand = Color.Tan;
 				Color ColorDangerHigh = Color.Red;
 				Color ColorDangerLow = Color.DarkRed;
-				Color ColorDangerAreaHigh = Color.Yellow;
-				Color ColorDangerAreaLow = Color.Brown;
+				Color ColorDangerAreaHigh = Color.LightBlue;
+				Color ColorDangerAreaLow = Color.Blue;
 				Color ColorPOI = Color.Green;
 				Color ColorTree = Color.DarkGreen;
+				Color ColorSeagull = Color.HotPink;
 
 				// Copy image into color array to avoid many calls to SetPixel() (it's slow)
 				var imageArray = new Color[image.Width, image.Height];
@@ -78,43 +87,26 @@ namespace OrtoAnalyzer
 				{
 					for (int y = 0; y < height; y++)
 					{
-						// Could already be filled in as land/tree - if so, it can't be a 'danger', but it can trigger 'more land' to be filled
-						bool alreadyLandOrTree = analyzeArray[x, y] != Color.Empty;
-
 						Color pixelColor = GetAveragePixel(imageArray, x, y, 0, width, height);
+						Color analyzedColor = Color.Empty;
 
-						Color dangerColor = Color.Empty;
-						int fillAroundStep = 0;
-
-						// Is this (probably) a tree?
-						if (pixelColor.GetBrightness() >= GreenBlueTreeBrightnessLevel && (pixelColor.G / pixelColor.B) > GreenBlueTreeFactor)
+						// Marked manually as safe?
+						if (pixelColor == ColorSafe)
 						{
-							fillAroundStep = TreeClearStep;
-							dangerColor = ColorTree;
+
 						}
 						// Is this (probably) land?
-						else if (pixelColor.GetBrightness() >= LandBrightnessLevel) // || sampleBrightness >= LandBrightnessLevel)
+						else if (pixelColor.GetBrightness() >= LandBrightnessLevel)
 						{
-							fillAroundStep = LandClearStep;
-							dangerColor = ColorLand;
+							analyzedColor = ColorLandOrSeagull;
 						}
-						// Maybe water? (Don't check here if pixel already covered by land/tree)
-						else if (!alreadyLandOrTree) 
+						// Maybe water?
+						else
 						{
-							fillAroundStep = 0;
-
 							Color sample = GetAveragePixel(imageArray, x, y, RockSampleStep, width, height);
 							float sampleHue = sample.GetHue();
 
-							if (sampleHue < HueDangerAreaHighMax)
-							{
-								dangerColor = ColorDangerAreaHigh;
-							}
-							else if (sampleHue < HueDangerAreaLowMax)
-							{
-								dangerColor = ColorDangerAreaLow;
-							}
-							else if (/*sample.R > MinRedLevelForDanger && */sampleHue < MaxHueForDanger)
+							if (sample.R > MinRedLevelForDanger && sampleHue < MaxHueForDanger)
 							{
 								Color sample2 = GetAveragePixel(imageArray, x, y, SurroundSampleStep, width, height);
 
@@ -122,29 +114,57 @@ namespace OrtoAnalyzer
 								float brightnessFactor = sample.GetBrightness() / sample2.GetBrightness();
 								if (brightnessFactor > BrightnessFactoryHigh)
 								{
-									dangerColor = ColorDangerHigh;
+									analyzedColor = ColorDangerHigh;
 								}
 								else if (brightnessFactor > BrightnessFactorLow)
 								{
-									dangerColor = ColorDangerLow;
+									analyzedColor = ColorDangerLow;
+								}
+							}
+
+							if (analyzedColor == Color.Empty)
+							{
+								if (sampleHue < HueDangerAreaHighMax)
+								{
+									analyzedColor = ColorDangerAreaHigh;
+								}
+								else if (sampleHue < HueDangerAreaLowMax)
+								{
+									analyzedColor = ColorDangerAreaLow;
 								}
 							}
 						}
 
-						// Is anything identified? Fill the box (or just a pixel if step = 0)
-						if (dangerColor != Color.Empty)
-						{
-							int cxBegin = Math.Max(0, x - fillAroundStep);
-							int cxEnd = Math.Min(width - 1, x + fillAroundStep);
-							int cyBegin = Math.Max(0, y - fillAroundStep);
-							int cyEnd = Math.Min(height - 1, y + fillAroundStep);
+						// Store the resulting color in the 'image' (color can be 'Empty')
+						analyzeArray[x, y] = analyzedColor;
+					}
+				}
 
-							for (int cx = cxBegin; cx <= cxEnd; cx++)
+
+				// Seagull remover
+				const int DangerousLandMaxSize = 9; // Land that is small must be marked (in case of high sea level)
+				const int SeagullMaxSize = 3; // Seagull is land of max 3 pixels
+				const int SeagullStep = 1; // 3x3 pixels
+				for (int x = 0; x < width; x++)
+				{
+					for (int y = 0; y < height; y++)
+					{
+						if (analyzeArray[x,y] == ColorLandOrSeagull)
+						{
+							// Fill land and seagulls with land color
+							int landSize = Utils.FindSizeAndFill(analyzeArray, x, y, out int centerX, out int centerY, out var foundColors, out var outsideColors, (color) => color == ColorLandOrSeagull, ColorLand);
+							// If land was small and surrounded by nothing, replace with 'nothing' (it's a seagull, probably)
+							if (landSize <= SeagullMaxSize && outsideColors.All(color => color == Color.Empty)) // seagull
 							{
-								for (int cy = cyBegin; cy <= cyEnd; cy++)
-								{
-									analyzeArray[cx, cy] = dangerColor;
-								}
+								// Fill all previously found 'land', mark as seagull
+								Utils.Fill(analyzeArray, x, y, (Color) => Color == ColorLand, ColorSeagull);
+								// Also draw a rectangle to hide any non-land pixels (aliased pixels from the seagull, probably)
+								//Utils.Rectangle(analyzeArray, centerX, centerY, SeagullStep, (Color) => Color != ColorSeagull, Color.Empty);
+							}
+							else if (landSize <= DangerousLandMaxSize)
+							{
+								// Fill all previously found 'land', mark as danger high
+								Utils.Fill(analyzeArray, x, y, (Color) => Color == ColorLand, ColorDangerHigh);
 							}
 						}
 					}
@@ -165,7 +185,7 @@ namespace OrtoAnalyzer
 							if (coordArray[x,y] != Color.Empty)
 							{
 								// Found something, find the pixel-size (area) of it
-								int size = Utils.FindSize(coordArray, x, y, out int centerX, out int centerY, out HashSet<Color> foundColors, (color) => color == ColorDangerHigh || color == ColorDangerLow);
+								int size = Utils.FindSizeAndRemove(coordArray, x, y, out int centerX, out int centerY, out var foundColors, out var outsideColors, (color) => color == ColorDangerHigh || color == ColorDangerLow);
 
 								// Is this danger 'large enough' ?
 								if (size >= MinDangerSize)

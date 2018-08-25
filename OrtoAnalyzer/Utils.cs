@@ -7,6 +7,29 @@ namespace OrtoAnalyzer
 {
     public class Utils
     {
+		public static void Rectangle(Color[,] imageArray, int centerX, int centerY, int step, Func<Color, bool> MatchColorFunc, Color color)
+		{
+			int width = imageArray.GetLength(0);
+			int height = imageArray.GetLength(1);
+
+			int cxBegin = Math.Max(0, centerX - step);
+			int cxEnd = Math.Min(width - 1, centerX + step);
+			int cyBegin = Math.Max(0, centerY - step);
+			int cyEnd = Math.Min(height - 1, centerY + step);
+
+			for (int cx = cxBegin; cx <= cxEnd; cx++)
+			{
+				for (int cy = cyBegin; cy <= cyEnd; cy++)
+				{
+					if (MatchColorFunc(imageArray[cx, cy]))
+					{
+						imageArray[cx, cy] = color;
+					}
+				}
+			}
+		}
+
+
 		class XY
 		{
 			public int X, Y;
@@ -19,23 +42,45 @@ namespace OrtoAnalyzer
 		}
 
 		/// <summary>
+		/// Fills matching contiguous colors with a new color (NOTE: The fill color cannot be a matching color!)
+		/// </summary>
+		/// <param name="imageArray"></param>
+		/// <param name="x"></param>
+		/// <param name="y"></param>
+		/// <param name="MatchColorFunc"></param>
+		/// <param name="fillColor"></param>
+		public static void Fill(Color[,] imageArray, int x, int y, Func<Color, bool> MatchColorFunc, Color fillColor)
+		{
+			FindSizeAndFill(imageArray, x, y, out var centerX, out var centerY, out var foundColors, out var outsideColors, MatchColorFunc, fillColor);
+		}
+
+		/// <summary>
 		/// Find all pixels contiguous to the starting pixel and identify this as a single danger.
 		/// </summary>
-		/// <param name="coordArray"></param>
+		/// <param name="imageArray"></param>
 		/// <param name="x"></param>
 		/// <param name="y"></param>
 		/// <param name="left"></param>
 		/// <param name="right"></param>
 		/// <param name="top"></param>
 		/// <param name="bottom"></param>
-		public static int FindSize(Color[,] coordArray, int x, int y, out int centerX, out int centerY, out HashSet<Color> foundColors, Func<Color, bool> MatchColorFunc)
+		public static int FindSizeAndRemove(Color[,] imageArray, int x, int y, out int centerX, out int centerY, out HashSet<Color> foundColors, out HashSet<Color> outsideColors, Func<Color, bool> MatchColorFunc)
 		{
+			return FindSizeAndFill(imageArray, x, y, out centerX, out centerY, out foundColors, out outsideColors, MatchColorFunc, Color.Empty);
+		}
+
+		public static int FindSizeAndFill(Color[,] imageArray, int x, int y, out int centerX, out int centerY, out HashSet<Color> foundColors, out HashSet<Color> outsideColors, Func<Color, bool> MatchColorFunc, Color fillColor)
+		{
+			if (MatchColorFunc(fillColor))
+				throw new ArgumentException("The fill color can't be a matching color!");
+
 			foundColors = new HashSet<Color>();
+			outsideColors = new HashSet<Color>();
 
 			int size = 0;
 
-			int width = coordArray.GetLength(0);
-			int height = coordArray.GetLength(1);
+			int width = imageArray.GetLength(0);
+			int height = imageArray.GetLength(1);
 
 			int totalX = 0;
 			int totalY = 0;
@@ -52,18 +97,19 @@ namespace OrtoAnalyzer
 				int py = pixel.Y;
 
 				// Is this pixel a match?
-				if (MatchColorFunc(coordArray[px, py]))
+				Color checkColor = imageArray[px, py];
+				if (MatchColorFunc(checkColor))
 				{
 					// Count the pixel and store the color
 					size++;
-					foundColors.Add(coordArray[px, py]);
+					foundColors.Add(checkColor);
 
 					// Count x and y for "centerpoint" calculation
 					totalX += px;
 					totalY += py;
 
-					// Remove this used pixel
-					coordArray[px, py] = Color.Empty;
+					// Fill this visited pixel
+					imageArray[px, py] = fillColor;
 
 					// Enqueue pixels in all 4 directions for check (diagonals not checked)
 					if (px > 0)
@@ -82,6 +128,10 @@ namespace OrtoAnalyzer
 					{
 						checkPixels.Enqueue(new XY(px, py + 1));
 					}
+				}
+				else
+				{
+					outsideColors.Add(checkColor);
 				}
 			}
 
