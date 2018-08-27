@@ -311,7 +311,7 @@ namespace OrtoAnalyzer
 			{
 				SweRefNorth = north;
 				SweRefEast = east;
-				GridCoordinate gridCoordinate = new GridCoordinate { Projection = Shorthand.Geodesy.Projections.SwedishProjections.SWEREF99TM, X = east, Y = north };
+				GridCoordinate gridCoordinate = new GridCoordinate { Projection = Shorthand.Geodesy.Projections.SwedishProjections.SWEREF99TM, X = north, Y = east };
 				Coordinate = GaussKruger.GridToGeodetic(gridCoordinate);
 			}
 

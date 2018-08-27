@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\GpxLibrary\GpxLibrary.csproj" />
     <ProjectReference Include="..\OrtoAnalyzer\OrtoAnalyzer.csproj" />
   </ItemGroup>
 
