@@ -11,7 +11,9 @@ namespace OrtoCharter
 			downloader.Download(6722731, 648365, 6719691, 643645, ortoFolderPath);
 
 			var analyzer = new OrtoAnalyzer.Analyzer(ortoFolderPath);
-			analyzer.Analyze();
+			const double CombineDistanceMeters = 10.0;
+			var pointsFound = analyzer.Analyze();
+			var pointsToUse = analyzer.CombinePoints(pointsFound, CombineDistanceMeters);
 		}
     }
 }

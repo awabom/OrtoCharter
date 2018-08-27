@@ -39,6 +39,49 @@ namespace OrtoAnalyzer
 			return pointsOfInterestBag;
 		}
 
+		/// <summary>
+		/// Minimize the number of points by combining nearby points
+		/// </summary>
+		/// <param name="pointsOfInterestBag"></param>
+		/// <param name="combineDistanceMeters"></param>
+		/// <returns></returns>
+		public IEnumerable<PointOfInterest> CombinePoints(IEnumerable<PointOfInterest> pointsOfInterest, double combineDistanceMeters)
+		{
+			var combinedPoints = new List<PointOfInterest>();
+
+			foreach (var pointGroup in pointsOfInterest.GroupBy(x => new Tuple<int, int>(Convert.ToInt32(x.SweRefEast / combineDistanceMeters), Convert.ToInt32(x.SweRefNorth / combineDistanceMeters))))
+			{
+				ItemType maxItemType = ItemType.DangerLow;
+
+				int count = 0;
+				double totalEast = 0;
+				double totalNorth = 0;
+
+				foreach (var point in pointGroup)
+				{
+					count++;
+					totalEast += point.SweRefEast;
+					totalNorth += point.SweRefNorth;
+
+					if (point.ItemType > maxItemType)
+						maxItemType = point.ItemType;
+				}
+
+				double midEast = totalEast / count;
+				double midNorth = totalNorth / count;
+
+				PointOfInterest midPoint = new PointOfInterest
+				{
+					ItemType = maxItemType
+				};
+				midPoint.SetSweRef99TM(midNorth, midEast);
+
+				combinedPoints.Add(midPoint);
+			}
+
+			return combinedPoints;
+		}
+
 		private static string GetAnalyzedFileName(string sourceFilePath)
 		{
 			return Path.Combine(Path.GetDirectoryName(sourceFilePath), Path.GetFileNameWithoutExtension(sourceFilePath) + "_analyzed.png");
@@ -144,7 +187,6 @@ namespace OrtoAnalyzer
 				// Seagull remover
 				const int DangerousLandMaxSize = 9; // Land that is small must be marked (in case of high sea level)
 				const int SeagullMaxSize = 3; // Seagull is land of max 3 pixels
-				const int SeagullStep = 1; // 3x3 pixels
 				for (int x = 0; x < width; x++)
 				{
 					for (int y = 0; y < height; y++)
@@ -254,27 +296,33 @@ namespace OrtoAnalyzer
 
 
 
+		/// <summary>
+		/// Item type in ascending danger level (important for some code!)
+		/// </summary>
 		public enum ItemType
 		{
-			DangerHigh,
-			DangerLow
+			DangerLow,
+			DangerHigh
 		}
 
 		public class PointOfInterest
 		{
 			public void SetSweRef99TM(double north, double east)
 			{
+				SweRefNorth = north;
+				SweRefEast = east;
 				GridCoordinate gridCoordinate = new GridCoordinate { Projection = Shorthand.Geodesy.Projections.SwedishProjections.SWEREF99TM, X = east, Y = north };
 				Coordinate = GaussKruger.GridToGeodetic(gridCoordinate);
 			}
 
-			public GeodeticCoordinate Coordinate { get; set; }
+			public double SweRefNorth { get; private set; }
+			public double SweRefEast { get; private set; }
+			public GeodeticCoordinate Coordinate { get; private set; }
 
 			public ItemType ItemType { get; set; }
 
 			public int CenterPixelX { get; set; }
 			public int CenterPixelY { get; set; }
-			
 		}
 
 		private static Color GetAveragePixel(Color[,] b, int x, int y, int sampleStep, int width, int height)
