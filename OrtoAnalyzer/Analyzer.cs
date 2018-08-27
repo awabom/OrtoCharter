@@ -114,7 +114,7 @@ namespace OrtoAnalyzer
 				Color ColorDangerAreaLow = Color.Blue;
 				Color ColorPOI = Color.Green;
 				Color ColorTree = Color.DarkGreen;
-				Color ColorSeagull = Color.HotPink;
+				Color ColorSeagull = Color.Aquamarine;
 
 				// Copy image into color array to avoid many calls to SetPixel() (it's slow)
 				var imageArray = new Color[image.Width, image.Height];
@@ -186,7 +186,7 @@ namespace OrtoAnalyzer
 
 				// Seagull remover
 				const int DangerousLandMaxSize = 9; // Land that is small must be marked (in case of high sea level)
-				const int SeagullMaxSize = 3; // Seagull is land of max 3 pixels
+				const int SeagullMaxSize = 6; // Seagull is land of max 3 pixels
 				for (int x = 0; x < width; x++)
 				{
 					for (int y = 0; y < height; y++)
