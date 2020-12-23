@@ -26,7 +26,7 @@ namespace OrtoAnalyzer
 					int currSouth = Math.Max(currNorth - 1024, south);
 					int currEast = Math.Min(currWest + 1024, east);
 
-					string boundingBox = currWest.ToString(IC) + "," + currSouth.ToString(IC) + "," + currEast.ToString(IC) + "," + currNorth.ToString(IC);
+					string boundingBox = currWest.ToString(IC) + "%2C" + currSouth.ToString(IC) + "%2C" + currEast.ToString(IC) + "%2C" + currNorth.ToString(IC);
 
 					string localFileName = Path.Combine(outputFolder, boundingBox + ".png");
 					if (!File.Exists(localFileName))
@@ -35,7 +35,7 @@ namespace OrtoAnalyzer
 						int height = (currNorth - currSouth) * 4;
 						int width = (currEast - currWest) * 4;
 
-						string fetchUrl = "https://kso.etjanster.lantmateriet.se/karta/ortofoto/wms/v1.2?LAYERS=orto025&EXCEPTIONS=application%2Fvnd.ogc.se_xml&FORMAT=image%2Fpng&TRANSPARENT=TRUE&STYLES=default%2Cdefault&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&SRS=EPSG%3A3006&BBOX=" + boundingBox + "&WIDTH=" + width.ToString(IC) + "&HEIGHT=" + height.ToString(IC);
+						string fetchUrl = "https://kso.etjanster.lantmateriet.se/karta/ortofoto/wms/v1.3?LAYERS=Ortofoto_0.25&EXCEPTIONS=application%2Fvnd.ogc.se_xml&FORMAT=image%2Fpng&TRANSPARENT=TRUE&STYLES=default%2Cdefault%2Cdefault%2Cdefault&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&SRS=EPSG%3A3006&BBOX=" + boundingBox + "&WIDTH=" + width.ToString(IC) + "&HEIGHT=" + height.ToString(IC);
 
 						webClient.DownloadFile(fetchUrl, localFileName);
 					}
