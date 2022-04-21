@@ -18,11 +18,13 @@ namespace OrtoAnalyzer
 			ortoFolderPath = _ortoFolderPath;
 		}
 
+		const string SuffixAnalyzed = "_analyzed";
+
 		public IEnumerable<PointOfInterest> Analyze()
 		{
 			//var files = new[] { Path.Combine(ortoFolderPath, "643645,6719691,644669,6720683,test.png") };
 			//var files = new[] { Path.Combine(ortoFolderPath, "645693,6721707,646717,6722731.png") };
-			var files = Directory.GetFiles(ortoFolderPath, "*.png").Where(x => !x.Contains("analyzed"));
+			var files = Directory.GetFiles(ortoFolderPath, "*.png").Where(x => !x.Contains(SuffixAnalyzed));
 
 			var pointsOfInterestBag = new ConcurrentBag<PointOfInterest>();
 
@@ -84,7 +86,7 @@ namespace OrtoAnalyzer
 
 		private static string GetAnalyzedFileName(string sourceFilePath)
 		{
-			return Path.Combine(Path.GetDirectoryName(sourceFilePath), Path.GetFileNameWithoutExtension(sourceFilePath) + "_analyzed.png");
+			return Path.Combine(Path.GetDirectoryName(sourceFilePath), Path.GetFileNameWithoutExtension(sourceFilePath) + SuffixAnalyzed + ".png");
 		}
 
 		private IEnumerable<PointOfInterest> AnalyzeSingle(string imageFilePath, string outputFilePath)
