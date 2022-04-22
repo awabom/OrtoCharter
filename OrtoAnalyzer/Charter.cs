@@ -19,14 +19,43 @@ namespace OrtoAnalyzer
 		{
 			get
 			{
-				if (_image == null)
-				{
-					Console.Out.WriteLine("Loading image: " + FileName);
-					_image = new Bitmap(System.Drawing.Image.FromFile(FileName));
-				}
+				LoadImage();
 				return _image;
 			}
 		}
+
+		private int? _imageWidth;
+		public int ImageWidth
+		{
+			get
+			{
+				if (_imageWidth == null)
+					LoadImage();
+				return _imageWidth.Value;
+			}
+		}
+		private int? _imageHeight;
+		public int ImageHeight
+		{
+			get
+			{
+				if (_imageHeight == null)
+					LoadImage();
+				return _imageHeight.Value;
+			}
+		}
+
+		private void LoadImage()
+		{
+			if (_image == null)
+			{
+				Console.Out.WriteLine("Loading image: " + FileName);
+				_image = new Bitmap(System.Drawing.Image.FromFile(FileName));
+				_imageHeight = _image.Height;
+				_imageWidth = _image.Width;
+			}
+		}
+
 		public void FreeImage()
 		{
 			_image?.Dispose();
@@ -57,14 +86,34 @@ namespace OrtoAnalyzer
 
 		List<ImageItem> loadedImages = new List<ImageItem>();
 
+		ImageItem previousMatch = null;
+
+		private static bool RegionContainsPosition(SweRefRegion region, SWEREF99Position pos99)
+		{
+			return region.North > pos99.Latitude
+				&& region.South < pos99.Latitude
+				&& region.West < pos99.Longitude
+				&& region.East > pos99.Longitude;
+		}
+
 		public Color? GetPixel(WGS84Position position)
 		{
 			SWEREF99Position pos99 = new SWEREF99Position(position, SWEREF99Position.SWEREFProjection.sweref_99_tm);
 
-			var match = Images.FirstOrDefault(x => x.Region.North > pos99.Latitude 
-				&& x.Region.South < pos99.Latitude 
-				&& x.Region.West < pos99.Longitude 
-				&& x.Region.East > pos99.Longitude);
+			ImageItem match = null;
+			if (previousMatch == null || !RegionContainsPosition(previousMatch.Region, pos99))
+			{
+				match = Images.FirstOrDefault(x => RegionContainsPosition(x.Region, pos99));
+				if (match != null)
+				{
+					previousMatch = match;
+				}
+			}
+			else
+			{
+				match = previousMatch;
+			}
+
 
 			if (match != null)
 			{
@@ -91,8 +140,8 @@ namespace OrtoAnalyzer
 				var regionHeight = match.Region.North - match.Region.South;
 				var regionWidth = match.Region.East - match.Region.West;
 
-				var x = (int)(dLon / regionWidth * match.Image.Width);
-				var y = (int)(dLat / regionHeight * match.Image.Height);
+				var x = (int)(dLon / regionWidth * match.ImageWidth);
+				var y = (int)(dLat / regionHeight * match.ImageHeight);
 
 				var sourcePixel = match.Image.GetPixel(x, y);
 				return sourcePixel;
@@ -163,7 +212,11 @@ namespace OrtoAnalyzer
 			int width = (int)(lonLength * 3);
 			int height = (int)(latLength * 3);
 
-			Bitmap bitmap = new Bitmap(width, height);
+			Bitmap bitmap = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+			var bitmapBits = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+
+			var bytesPerRow = bitmapBits.Stride;
+			var bytes = new byte[height * bytesPerRow];
 
 			Console.Out.WriteLine("Building chart: " + fileNameKap);
 
@@ -181,12 +234,17 @@ namespace OrtoAnalyzer
 						var red = ToByte(value.R * 2.5);
 						var green = ToByte(value.G * 1.5);
 						var blue = ToByte(value.B * 0.5);
-						var result = Color.FromArgb(red, green, blue);
-												
-						bitmap.SetPixel(x, y, result);
+
+						int pixelStart = y * bytesPerRow + 3 * x;
+						bytes[pixelStart + 2] = red;
+						bytes[pixelStart + 1] = green;
+						bytes[pixelStart] = blue;
 					}
 				}
 			}
+
+			System.Runtime.InteropServices.Marshal.Copy(bytes, 0, bitmapBits.Scan0, bytes.Length);
+			bitmap.UnlockBits(bitmapBits);
 
 			bitmap.Save(tempImage);
 
