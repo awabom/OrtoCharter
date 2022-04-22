@@ -126,7 +126,7 @@ namespace OrtoAnalyzer
 					}
 					loadedImages.Add(match);
 
-					while (loadedImages.Count > 4)
+					while (loadedImages.Count > 25)
 					{
 						Console.Out.WriteLine("Removing from cache: " + loadedImages[0].FileName);
 						loadedImages[0].FreeImage();
@@ -186,14 +186,26 @@ namespace OrtoAnalyzer
 
 		const double MetersPerLatitudeDegree = 111330;
 
-		public void Create(WGS84Position northWest, WGS84Position southEast)
+		public enum FilterMode
 		{
-			Load();
+			Natural,
+			Subsurface
+		}
 
-			string fileNameKap = Path.Combine(outputPath, northWest.LatitudeToString(WGS84Position.WGS84Format.Degrees) + "_" +
+		public void Create(WGS84Position northWest, WGS84Position southEast, string subFolderName, double pixelsPerMeter, FilterMode filterMode)
+		{
+			string subFolderPath = Path.Combine(outputPath, subFolderName);
+			Directory.CreateDirectory(subFolderPath);
+			string fileNameKap = Path.Combine(subFolderPath, northWest.LatitudeToString(WGS84Position.WGS84Format.Degrees) + "_" +
 				northWest.LongitudeToString(WGS84Position.WGS84Format.Degrees) + "_" +
 				southEast.LatitudeToString(WGS84Position.WGS84Format.Degrees) + "_" +
 				southEast.LongitudeToString(WGS84Position.WGS84Format.Degrees) + ".kap");
+
+			if (File.Exists(fileNameKap))
+				return;
+
+			Load();
+
 			string tempImage = fileNameKap + ".png";
 
 			// Build chart image in Mercator projection
@@ -209,13 +221,21 @@ namespace OrtoAnalyzer
 			double lonFactor = Math.Cos(lat1 * Math.PI / 180);
 			double lonLength = (dLon * lonFactor) * MetersPerLatitudeDegree;
 			
-			int width = (int)(lonLength * 3);
-			int height = (int)(latLength * 3);
+			int width = (int)(lonLength * pixelsPerMeter);
+			int height = (int)(latLength * pixelsPerMeter);
+
+			// To narrow area for making a chart?
+			if (width == 0 || height == 0)
+				return;
 
 			Bitmap bitmap = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
 			var bitmapBits = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
 
-			var bytesPerRow = bitmapBits.Stride;
+			var stride = bitmapBits.Stride;
+			if (stride < 0)
+				throw new NotImplementedException("Negative Stride not implemented, stride = " + stride);
+
+			var bytesPerRow = stride;
 			var bytes = new byte[height * bytesPerRow];
 
 			Console.Out.WriteLine("Building chart: " + fileNameKap);
@@ -231,11 +251,31 @@ namespace OrtoAnalyzer
 					if (color != null)
 					{
 						var value = color.Value;
-						var red = ToByte(value.R * 2.5);
-						var green = ToByte(value.G * 1.5);
-						var blue = ToByte(value.B * 0.5);
 
-						int pixelStart = y * bytesPerRow + 3 * x;
+						byte red = value.R;
+						byte green = value.G;
+						byte blue = value.B;
+
+						const int HighLevel = 80;
+						const int HighLevelSmudge = 5;
+
+						// Always create fewer colors in the light pixels (had some palette issues with imgkap before this)
+						if (red > HighLevel && green > HighLevel && blue > HighLevel)
+						{
+							red -= (byte)(red % HighLevelSmudge);
+							green -= (byte)(green % HighLevelSmudge);
+							blue -= (byte)(blue % HighLevelSmudge);
+						}
+
+						// Subsurface: Raise red, green - lower blue
+						if (filterMode == FilterMode.Subsurface)
+						{
+							red = ToByte(red * 2.5);
+							green = ToByte(green * 1.5);
+							blue = ToByte(blue * 0.5);
+						}
+
+						int pixelStart = y * stride + 3 * x;
 						bytes[pixelStart + 2] = red;
 						bytes[pixelStart + 1] = green;
 						bytes[pixelStart] = blue;
@@ -298,7 +338,12 @@ namespace OrtoAnalyzer
 				UseShellExecute = false
 			};
 			Console.Out.WriteLine("Running: imgkap " + startInfo.Arguments);
-			Process.Start(startInfo).WaitForExit();
+			var process = Process.Start(startInfo);
+			process.WaitForExit();
+			if (process.ExitCode != 0)
+			{
+				File.Delete(outputKapFileName);
+			}
 		}
 
 		/*

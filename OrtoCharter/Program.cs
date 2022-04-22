@@ -7,6 +7,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using static OrtoAnalyzer.Charter;
 
 namespace OrtoCharter
 {
@@ -31,12 +32,20 @@ namespace OrtoCharter
 				return 1;
 			}
 
+			const double PartLat = 0.02;
+			const double PartLon = PartLat * 2;
 
+			// Make the area align on our grid
+			north = north - north % PartLat;
+			south = south + (PartLat - south % PartLat);
+			west = west - west % PartLon;
+			east = east + (PartLon - east % PartLon);
+			
 			var pathMyDocuments = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
 			var pathOrtoCharter = Path.Combine(pathMyDocuments, "OrtoCharter");
 			Directory.CreateDirectory(pathOrtoCharter);
 
-			var downloader = new OrtoAnalyzer.OrtoDownloader();
+			var downloader = new OrtoDownloader();
 			string downloadPath = Path.Combine(pathOrtoCharter, "Download");
 			Directory.CreateDirectory(downloadPath);
 
@@ -62,25 +71,31 @@ namespace OrtoCharter
 			// Make Chart files?
 			if (args.Contains("/charts"))
 			{
-				const double PartLat = 0.02;
-				const double PartLon = 0.04;
+				/*
+
+				const double PixelsPerMeter = 3;
+				const FilterMode Filter = FilterMode.Subsurface;
+				*/
+
+				const double PixelsPerMeter = 0.5;
+				const FilterMode Filter = FilterMode.Natural;
+
+				string subFolderName = FormattableString.Invariant($"{PixelsPerMeter}_{Filter}");
 				var outputPath = Path.Combine(pathOrtoCharter, "Charts");
-				Directory.CreateDirectory(outputPath);
 				using (var charter = new Charter(downloadPath, outputPath))
 				{
-
 					// Build parts
-					for (double partNorth = northWest.Latitude; partNorth > southEast.Latitude; partNorth -= PartLat)
+					for (double partNorth = north; partNorth > south; partNorth = Math.Round(partNorth - PartLat, 5))
 					{
-						for (double partWest = northWest.Longitude; partWest < southEast.Longitude; partWest += PartLon)
+						for (double partWest = west; partWest < east; partWest = Math.Round(partWest + PartLon, 5))
 						{
-							double partSouth = Math.Max(southEast.Latitude, partNorth - PartLat);
-							double partEast = Math.Min(southEast.Longitude, partWest + PartLon);
+							double partSouth = partNorth - PartLat;
+							double partEast = partWest + PartLon;
 
 							var partNorthWest = new WGS84Position(partNorth, partWest);
 							var partSouthEast = new WGS84Position(partSouth, partEast);
 
-							charter.Create(partNorthWest, partSouthEast);
+							charter.Create(partNorthWest, partSouthEast, subFolderName, PixelsPerMeter, Filter);
 						}
 					}
 				}
