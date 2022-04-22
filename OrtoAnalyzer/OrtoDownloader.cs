@@ -48,7 +48,7 @@ namespace OrtoAnalyzer
 			var east99 = (int)Math.Ceiling(cornersSweRef99.Max(x => x.Longitude));
 			var west99 = (int)Math.Floor(cornersSweRef99.Min(x => x.Longitude));
 
-			var sweRegion = new OrtoAnalyzer.SweRefRegion(north: north99, east: east99, south: south99, west: west99);
+			var sweRegion = new SweRefRegion(north: north99, east: east99, south: south99, west: west99);
 			return sweRegion;
 		}
 

@@ -96,6 +96,8 @@ namespace OrtoAnalyzer
 			}
 		}
 
+		const double MetersPerLatitudeDegree = 111330;
+
 		public void Create(WGS84Position northWest, WGS84Position southEast)
 		{
 			Load();
@@ -114,11 +116,13 @@ namespace OrtoAnalyzer
 
 			double dLat = lat0 - lat1;
 			double dLon = lon1 - lon0;
-
-			var region = OrtoDownloader.GetBoundingRegion(northWest, southEast);
-
-			int width = 500;// (region.East - region.West) * 4;
-			int height = 500;// (region.North - region.South) * 4;
+			
+			double latLength = dLat * MetersPerLatitudeDegree;
+			double lonFactor = Math.Cos(lat1 * Math.PI / 180);
+			double lonLength = (dLon * lonFactor) * MetersPerLatitudeDegree;
+			
+			int width = (int)(lonLength * 2.5);
+			int height = (int)(latLength * 2.5);
 
 			Bitmap bitmap = new Bitmap(width, height);
 

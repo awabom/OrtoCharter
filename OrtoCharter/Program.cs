@@ -2,9 +2,11 @@
 using MightyLittleGeodesy.Positions;
 using OrtoAnalyzer;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace OrtoCharter
 {
@@ -60,27 +62,28 @@ namespace OrtoCharter
 			// Make Chart files?
 			if (args.Contains("/charts"))
 			{
-				const double PartDegree = 0.01;
+				const double PartLat = 0.02;
+				const double PartLon = 0.04;
 				var outputPath = Path.Combine(pathOrtoCharter, "Charts");
 				Directory.CreateDirectory(outputPath);
-				var charter = new Charter(downloadPath, outputPath);
-				charter.Create(northWest, southEast);
-
-				/*
-				for (double partNorth = northWest.Latitude; partNorth > southEast.Latitude; partNorth -= PartDegree)
+				using (var charter = new Charter(downloadPath, outputPath))
 				{
-					for (double partWest = northWest.Longitude; partWest < southEast.Longitude; partWest += PartDegree)
+
+					// Build parts
+					for (double partNorth = northWest.Latitude; partNorth > southEast.Latitude; partNorth -= PartLat)
 					{
-						double partSouth = Math.Max(southEast.Latitude, partNorth - PartDegree);
-						double partEast = Math.Min(southEast.Longitude, partWest + PartDegree);
+						for (double partWest = northWest.Longitude; partWest < southEast.Longitude; partWest += PartLon)
+						{
+							double partSouth = Math.Max(southEast.Latitude, partNorth - PartLat);
+							double partEast = Math.Min(southEast.Longitude, partWest + PartLon);
 
-						var partNorthWest = new WGS84Position(partNorth, partWest);
-						var partSouthEast = new WGS84Position(partSouth, partEast);
+							var partNorthWest = new WGS84Position(partNorth, partWest);
+							var partSouthEast = new WGS84Position(partSouth, partEast);
 
-						charter.Create(partNorthWest, partSouthEast);
+							charter.Create(partNorthWest, partSouthEast);
+						}
 					}
 				}
-				*/
 			}
 
 			return 0;
