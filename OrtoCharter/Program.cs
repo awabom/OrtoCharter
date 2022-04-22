@@ -1,5 +1,8 @@
 ﻿using GpxLibrary;
+using MightyLittleGeodesy.Positions;
+using OrtoAnalyzer;
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 
@@ -7,20 +10,22 @@ namespace OrtoCharter
 {
     class Program
     {
+		static CultureInfo IC = CultureInfo.InvariantCulture;
+
 		static int Main(string[] args)
 		{
 			// Parse command line for coordinates
-			int north, east, south, west;
+			double north, east, south, west;
 			try
 			{
-				north = int.Parse(args[0]);
-				east = int.Parse(args[1]);
-				south = int.Parse(args[2]);
-				west = int.Parse(args[3]);
+				north = double.Parse(args[0], IC);
+				west = double.Parse(args[1], IC);
+				south = double.Parse(args[2], IC);
+				east = double.Parse(args[3], IC);
 			}
 			catch
 			{
-				Console.Error.WriteLine("Usage (coordinates in SWEREF 99 TM): <north> <east> <south> <west> [/analyze] [/charts]");
+				Console.Error.WriteLine("Usage (coordinates in WGS84 decimal degrees): <north> <west> <south> <east> [/analyze] [/charts]");
 				return 1;
 			}
 
@@ -32,7 +37,13 @@ namespace OrtoCharter
 			var downloader = new OrtoAnalyzer.OrtoDownloader();
 			string downloadPath = Path.Combine(pathOrtoCharter, "Download");
 			Directory.CreateDirectory(downloadPath);
-			downloader.Download(north, east, south, west, downloadPath);
+
+			// Get bounding SWEREF 99 box
+			var northWest = new WGS84Position(north, west);
+			var southEast = new WGS84Position(south, east);
+			SweRefRegion sweRegion = OrtoDownloader.GetBoundingRegion(northWest, southEast);
+
+			downloader.Download(sweRegion, downloadPath);
 
 			// Analyze for rocks and other features?
 			if (args.Contains("/analyze"))
@@ -49,10 +60,32 @@ namespace OrtoCharter
 			// Make Chart files?
 			if (args.Contains("/charts"))
 			{
-				// TODO
+				const double PartDegree = 0.01;
+				var outputPath = Path.Combine(pathOrtoCharter, "Charts");
+				Directory.CreateDirectory(outputPath);
+				var charter = new Charter(downloadPath, outputPath);
+				charter.Create(northWest, southEast);
+
+				/*
+				for (double partNorth = northWest.Latitude; partNorth > southEast.Latitude; partNorth -= PartDegree)
+				{
+					for (double partWest = northWest.Longitude; partWest < southEast.Longitude; partWest += PartDegree)
+					{
+						double partSouth = Math.Max(southEast.Latitude, partNorth - PartDegree);
+						double partEast = Math.Min(southEast.Longitude, partWest + PartDegree);
+
+						var partNorthWest = new WGS84Position(partNorth, partWest);
+						var partSouthEast = new WGS84Position(partSouth, partEast);
+
+						charter.Create(partNorthWest, partSouthEast);
+					}
+				}
+				*/
 			}
 
 			return 0;
 		}
-    }
+
+		
+	}
 }

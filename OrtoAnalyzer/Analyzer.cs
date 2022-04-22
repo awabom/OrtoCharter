@@ -12,19 +12,17 @@ namespace OrtoAnalyzer
 {
     public class Analyzer
     {
-		string ortoFolderPath;
-		public Analyzer(string _ortoFolderPath)
+		string OrtoFolderPath { get; }
+		public Analyzer(string ortoFolderPath)
 		{
-			ortoFolderPath = _ortoFolderPath;
+			OrtoFolderPath = ortoFolderPath;
 		}
 
-		const string SuffixAnalyzed = "_analyzed";
+		internal const string SuffixAnalyzed = "_analyzed";
 
 		public IEnumerable<PointOfInterest> Analyze()
 		{
-			//var files = new[] { Path.Combine(ortoFolderPath, "643645,6719691,644669,6720683,test.png") };
-			//var files = new[] { Path.Combine(ortoFolderPath, "645693,6721707,646717,6722731.png") };
-			var files = Directory.GetFiles(ortoFolderPath, "*.png").Where(x => !x.Contains(SuffixAnalyzed));
+			var files = OrtoDownloader.GetUntouchedFiles(OrtoFolderPath);
 
 			var pointsOfInterestBag = new ConcurrentBag<PointOfInterest>();
 
