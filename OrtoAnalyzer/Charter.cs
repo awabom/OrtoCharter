@@ -121,8 +121,8 @@ namespace OrtoAnalyzer
 			double lonFactor = Math.Cos(lat1 * Math.PI / 180);
 			double lonLength = (dLon * lonFactor) * MetersPerLatitudeDegree;
 			
-			int width = (int)(lonLength * 2.5);
-			int height = (int)(latLength * 2.5);
+			int width = (int)(lonLength * 3);
+			int height = (int)(latLength * 3);
 
 			Bitmap bitmap = new Bitmap(width, height);
 
@@ -137,8 +137,8 @@ namespace OrtoAnalyzer
 					if (color != null)
 					{
 						var value = color.Value;
-						var red = ToByte(value.R * 1.5);
-						var green = ToByte(value.G);
+						var red = ToByte(value.R * 2.5);
+						var green = ToByte(value.G * 1.5);
 						var blue = ToByte(value.B * 0.5);
 						var result = Color.FromArgb(red, green, blue);
 												
