@@ -21,14 +21,19 @@ namespace OrtoCharter
 			double north, east, south, west;
 			try
 			{
-				north = double.Parse(args[0], IC);
-				west = double.Parse(args[1], IC);
-				south = double.Parse(args[2], IC);
-				east = double.Parse(args[3], IC);
+				double lat0 = double.Parse(args[0], IC);
+				double lon0 = double.Parse(args[1], IC);
+				double lat1 = double.Parse(args[2], IC);
+				double lon1 = double.Parse(args[3], IC);
+
+				north = Math.Max(lat0, lat1);
+				east = Math.Max(lon0, lon1);
+				south = Math.Min(lat0, lat1);
+				west = Math.Min(lon0, lon1);
 			}
 			catch
 			{
-				Console.Error.WriteLine("Usage (coordinates in WGS84 decimal degrees): <north> <west> <south> <east> [/analyze] [/charts]");
+				Console.Error.WriteLine("Usage (coordinates in WGS84 decimal degrees): <lat0> <lon0> <lat1> <lon1> [/analyze] [/charts]");
 				return 1;
 			}
 
@@ -36,8 +41,8 @@ namespace OrtoCharter
 			const double PartLon = PartLat * 2;
 
 			// Make the area align on our grid
-			north = north - north % PartLat;
-			south = south + (PartLat - south % PartLat);
+			north = north + (PartLat - north % PartLat);
+			south = south - south % PartLat;
 			west = west - west % PartLon;
 			east = east + (PartLon - east % PartLon);
 			
@@ -71,31 +76,31 @@ namespace OrtoCharter
 			// Make Chart files?
 			if (args.Contains("/charts"))
 			{
-				/*
-
-				const double PixelsPerMeter = 3;
-				const FilterMode Filter = FilterMode.Subsurface;
-				*/
-
-				const double PixelsPerMeter = 0.5;
-				const FilterMode Filter = FilterMode.Natural;
-
-				string subFolderName = FormattableString.Invariant($"{PixelsPerMeter}_{Filter}");
-				var outputPath = Path.Combine(pathOrtoCharter, "Charts");
-				using (var charter = new Charter(downloadPath, outputPath))
+				for (int i = 0; i < 2; i++)
 				{
-					// Build parts
-					for (double partNorth = north; partNorth > south; partNorth = Math.Round(partNorth - PartLat, 5))
+					double PixelsPerMeter = i == 0 ? 0.5 : 3;
+					FilterMode Filter = i == 0 ? FilterMode.Natural : FilterMode.Subsurface;
+
+					string subFolderName = FormattableString.Invariant($"{PixelsPerMeter}_{Filter}");
+
+					Console.Out.WriteLine("Creating Chart Group: " + subFolderName);
+
+					var outputPath = Path.Combine(pathOrtoCharter, "Charts");
+					using (var charter = new Charter(downloadPath, outputPath))
 					{
-						for (double partWest = west; partWest < east; partWest = Math.Round(partWest + PartLon, 5))
+						// Build parts
+						for (double partNorth = north; partNorth > south; partNorth = Math.Round(partNorth - PartLat, 5))
 						{
-							double partSouth = partNorth - PartLat;
-							double partEast = partWest + PartLon;
+							for (double partWest = west; partWest < east; partWest = Math.Round(partWest + PartLon, 5))
+							{
+								double partSouth = partNorth - PartLat;
+								double partEast = partWest + PartLon;
 
-							var partNorthWest = new WGS84Position(partNorth, partWest);
-							var partSouthEast = new WGS84Position(partSouth, partEast);
+								var partNorthWest = new WGS84Position(partNorth, partWest);
+								var partSouthEast = new WGS84Position(partSouth, partEast);
 
-							charter.Create(partNorthWest, partSouthEast, subFolderName, PixelsPerMeter, Filter);
+								charter.Create(partNorthWest, partSouthEast, subFolderName, PixelsPerMeter, Filter);
+							}
 						}
 					}
 				}

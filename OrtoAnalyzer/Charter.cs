@@ -49,7 +49,7 @@ namespace OrtoAnalyzer
 		{
 			if (_image == null)
 			{
-				Console.Out.WriteLine("Loading image: " + FileName);
+				//Console.Out.WriteLine("Loading image: " + FileName);
 				_image = new Bitmap(System.Drawing.Image.FromFile(FileName));
 				_imageHeight = _image.Height;
 				_imageWidth = _image.Width;
@@ -128,7 +128,7 @@ namespace OrtoAnalyzer
 
 					while (loadedImages.Count > 25)
 					{
-						Console.Out.WriteLine("Removing from cache: " + loadedImages[0].FileName);
+						//Console.Out.WriteLine("Removing from cache: " + loadedImages[0].FileName);
 						loadedImages[0].FreeImage();
 						loadedImages.RemoveAt(0);
 					}
