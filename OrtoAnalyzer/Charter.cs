@@ -13,18 +13,37 @@ namespace OrtoAnalyzer
 	class ImageItem : IDisposable
 	{
 		public SweRefRegion Region { get; }
-		public Bitmap Image { get; private set; }
+
+		Bitmap _image;
+		public Bitmap Image
+		{
+			get
+			{
+				if (_image == null)
+				{
+					Console.Out.WriteLine("Loading image: " + FileName);
+					_image = new Bitmap(System.Drawing.Image.FromFile(FileName));
+				}
+				return _image;
+			}
+		}
+		public void FreeImage()
+		{
+			_image?.Dispose();
+			_image = null;
+		}
+
+		public string FileName { get; private set; }
 
 		public void Dispose()
 		{
-			Image?.Dispose();
-			Image = null;
+			FreeImage();
 		}
 
-		public ImageItem(SweRefRegion region, Image image)
+		public ImageItem(SweRefRegion region, string fileName)
 		{
 			Region = region;
-			Image = new Bitmap(image);
+			FileName = fileName;
 		}
 	}
 	class ImageCache : IDisposable
@@ -36,6 +55,8 @@ namespace OrtoAnalyzer
 			Images.Add(image);
 		}
 
+		List<ImageItem> loadedImages = new List<ImageItem>();
+
 		public Color? GetPixel(WGS84Position position)
 		{
 			SWEREF99Position pos99 = new SWEREF99Position(position, SWEREF99Position.SWEREFProjection.sweref_99_tm);
@@ -44,8 +65,27 @@ namespace OrtoAnalyzer
 				&& x.Region.South < pos99.Latitude 
 				&& x.Region.West < pos99.Longitude 
 				&& x.Region.East > pos99.Longitude);
+
 			if (match != null)
 			{
+				// Handle cache size (remove images if too large)
+				if (loadedImages.LastOrDefault() != match)
+				{
+					if (loadedImages.Contains(match))
+					{
+						loadedImages.Remove(match);
+					}
+					loadedImages.Add(match);
+
+					while (loadedImages.Count > 4)
+					{
+						Console.Out.WriteLine("Removing from cache: " + loadedImages[0].FileName);
+						loadedImages[0].FreeImage();
+						loadedImages.RemoveAt(0);
+					}
+				}
+
+				// Get the pixel for this position from the source image
 				var dLon = pos99.Longitude - match.Region.West;
 				var dLat = match.Region.North - pos99.Latitude;
 				var regionHeight = match.Region.North - match.Region.South;
@@ -91,8 +131,7 @@ namespace OrtoAnalyzer
 			foreach (var file in OrtoDownloader.GetUntouchedFiles(ortoFolderPath))
 			{
 				SweRefRegion region = OrtoDownloader.ParseFileNameToSWEREF(file);
-				var image = Image.FromFile(file);
-				_imageCache.AddImage(new ImageItem(region, image));
+				_imageCache.AddImage(new ImageItem(region, file));
 			}
 		}
 
@@ -102,9 +141,9 @@ namespace OrtoAnalyzer
 		{
 			Load();
 
-			string fileNameKap = Path.Combine(outputPath, northWest.LatitudeToString(WGS84Position.WGS84Format.Degrees) +
-				northWest.LongitudeToString(WGS84Position.WGS84Format.Degrees) +
-				southEast.LatitudeToString(WGS84Position.WGS84Format.Degrees) +
+			string fileNameKap = Path.Combine(outputPath, northWest.LatitudeToString(WGS84Position.WGS84Format.Degrees) + "_" +
+				northWest.LongitudeToString(WGS84Position.WGS84Format.Degrees) + "_" +
+				southEast.LatitudeToString(WGS84Position.WGS84Format.Degrees) + "_" +
 				southEast.LongitudeToString(WGS84Position.WGS84Format.Degrees) + ".kap");
 			string tempImage = fileNameKap + ".png";
 
@@ -125,6 +164,8 @@ namespace OrtoAnalyzer
 			int height = (int)(latLength * 3);
 
 			Bitmap bitmap = new Bitmap(width, height);
+
+			Console.Out.WriteLine("Building chart: " + fileNameKap);
 
 			for (int x = 0; x < width; x++)
 			{
