@@ -86,68 +86,65 @@ namespace OrtoAnalyzer
 
 		List<ImageItem> loadedImages = new List<ImageItem>();
 
-		ImageItem previousMatch = null;
-
 		private static bool RegionContainsPosition(SweRefRegion region, SWEREF99Position pos99)
 		{
-			return region.North > pos99.Latitude
+			return region.North >= pos99.Latitude
 				&& region.South < pos99.Latitude
-				&& region.West < pos99.Longitude
+				&& region.West <= pos99.Longitude
 				&& region.East > pos99.Longitude;
 		}
 
+		ImageItem match = null;
 		public Color? GetPixel(WGS84Position position)
 		{
 			SWEREF99Position pos99 = new SWEREF99Position(position, SWEREF99Position.SWEREFProjection.sweref_99_tm);
 
-			ImageItem match = null;
-			if (previousMatch == null || !RegionContainsPosition(previousMatch.Region, pos99))
+			if (match == null || !RegionContainsPosition(match.Region, pos99))
 			{
-				match = Images.FirstOrDefault(x => RegionContainsPosition(x.Region, pos99));
-				if (match != null)
+				match = Images.FirstOrDefault(checkImage => RegionContainsPosition(checkImage.Region, pos99));
+			}
+
+			if (match == null)
+			{
+				return null;
+			}
+
+			// Handle cache size (remove images if too large)
+			if (loadedImages.LastOrDefault() != match)
+			{
+				if (loadedImages.Contains(match))
 				{
-					previousMatch = match;
+					loadedImages.Remove(match);
+				}
+				loadedImages.Add(match);
+
+				while (loadedImages.Count > 25)
+				{
+					//Console.Out.WriteLine("Removing from cache: " + loadedImages[0].FileName);
+					loadedImages[0].FreeImage();
+					loadedImages.RemoveAt(0);
 				}
 			}
-			else
+
+			// Get the pixel for this position from the source image
+			var dLon = pos99.Longitude - match.Region.West;
+			var dLat = match.Region.North - pos99.Latitude;
+			var regionHeight = match.Region.North - match.Region.South;
+			var regionWidth = match.Region.East - match.Region.West;
+
+			var x = (int)(dLon / regionWidth * match.ImageWidth);
+			var y = (int)(dLat / regionHeight * match.ImageHeight);
+
+			// Check that the coordinate is valid
+			Debug.Assert(!(x < 0 || x >= match.ImageWidth || y < 0 || y >= match.ImageHeight));
+
+			var sourcePixel = match.Image.GetPixel(x, y);
+			if (sourcePixel.A == 0)
 			{
-				match = previousMatch;
+				throw new Exception("File possibly damaged: " + match.FileName);
 			}
 
-
-			if (match != null)
-			{
-				// Handle cache size (remove images if too large)
-				if (loadedImages.LastOrDefault() != match)
-				{
-					if (loadedImages.Contains(match))
-					{
-						loadedImages.Remove(match);
-					}
-					loadedImages.Add(match);
-
-					while (loadedImages.Count > 25)
-					{
-						//Console.Out.WriteLine("Removing from cache: " + loadedImages[0].FileName);
-						loadedImages[0].FreeImage();
-						loadedImages.RemoveAt(0);
-					}
-				}
-
-				// Get the pixel for this position from the source image
-				var dLon = pos99.Longitude - match.Region.West;
-				var dLat = match.Region.North - pos99.Latitude;
-				var regionHeight = match.Region.North - match.Region.South;
-				var regionWidth = match.Region.East - match.Region.West;
-
-				var x = (int)(dLon / regionWidth * match.ImageWidth);
-				var y = (int)(dLat / regionHeight * match.ImageHeight);
-
-				var sourcePixel = match.Image.GetPixel(x, y);
-				return sourcePixel;
-			}
-
-			return null;
+			return sourcePixel;
 		}
 
 		public void Dispose()
@@ -184,7 +181,7 @@ namespace OrtoAnalyzer
 			}
 		}
 
-		const double MetersPerLatitudeDegree = 111330;
+		const decimal MetersPerLatitudeDegree = 111330;
 
 		public enum FilterMode
 		{
@@ -192,14 +189,12 @@ namespace OrtoAnalyzer
 			Subsurface
 		}
 
-		public void Create(WGS84Position northWest, WGS84Position southEast, string subFolderName, double pixelsPerMeter, FilterMode filterMode)
+		public void Create(decimal lat0, decimal lon0, decimal lat1, decimal lon1, string subFolderName, decimal pixelsPerMeter, FilterMode filterMode)
 		{
 			string subFolderPath = Path.Combine(outputPath, subFolderName);
 			Directory.CreateDirectory(subFolderPath);
-			string fileNameKap = Path.Combine(subFolderPath, northWest.LatitudeToString(WGS84Position.WGS84Format.Degrees) + "_" +
-				northWest.LongitudeToString(WGS84Position.WGS84Format.Degrees) + "_" +
-				southEast.LatitudeToString(WGS84Position.WGS84Format.Degrees) + "_" +
-				southEast.LongitudeToString(WGS84Position.WGS84Format.Degrees) + ".kap");
+			string name = FormattableString.Invariant($"{lat0:0.##########}_{lon0:0.##########}_{lat1:0.##########}_{lon1:0.##########}.kap");
+			string fileNameKap = Path.Combine(subFolderPath, name);
 
 			if (File.Exists(fileNameKap))
 				return;
@@ -209,17 +204,13 @@ namespace OrtoAnalyzer
 			string tempImage = fileNameKap + ".png";
 
 			// Build chart image in Mercator projection
-			double lat0 = northWest.Latitude;
-			double lon0 = northWest.Longitude;
-			double lat1 = southEast.Latitude;
-			double lon1 = southEast.Longitude;
 
-			double dLat = lat0 - lat1;
-			double dLon = lon1 - lon0;
+			decimal dLat = lat0 - lat1;
+			decimal dLon = lon1 - lon0;
 			
-			double latLength = dLat * MetersPerLatitudeDegree;
-			double lonFactor = Math.Cos(lat1 * Math.PI / 180);
-			double lonLength = (dLon * lonFactor) * MetersPerLatitudeDegree;
+			decimal latLength = dLat * MetersPerLatitudeDegree;
+			decimal lonFactor = (decimal)Math.Cos((double)lat1 * Math.PI / 180);
+			decimal lonLength = (dLon * lonFactor) * MetersPerLatitudeDegree;
 			
 			int width = (int)(lonLength * pixelsPerMeter);
 			int height = (int)(latLength * pixelsPerMeter);
@@ -240,13 +231,16 @@ namespace OrtoAnalyzer
 
 			Console.Out.WriteLine("Building chart: " + fileNameKap);
 
+			var dLatHeight = dLat / height;
+			var dLonWidth = dLon / width;
+
 			for (int x = 0; x < width; x++)
 			{
 				for (int y = 0; y < height; y++)
 				{
-					double lat = lat0 - dLat * ((double)y / height);
-					double lon = lon0 + dLon * ((double)x / width);
-					WGS84Position position = new WGS84Position(lat, lon);
+					var lat = lat0 - dLatHeight * y;
+					var lon = lon0 + dLonWidth * x;
+					WGS84Position position = new WGS84Position((double)lat, (double)lon);
 					var color = _imageCache.GetPixel(position);
 					if (color != null)
 					{
@@ -289,7 +283,7 @@ namespace OrtoAnalyzer
 			bitmap.Save(tempImage);
 
 			// Convert mercator image to chart
-			Convert(tempImage, fileNameKap, northWest, southEast);
+			Convert(tempImage, fileNameKap, lat0, lon0, lat1, lon1);
 
 			// Delete mercator image
 			// TODO ENABLE File.Delete(tempImage);
@@ -313,21 +307,9 @@ namespace OrtoAnalyzer
 			_imageCache = null;
 		}
 
-		private void Convert(string file, string outputKapFileName, WGS84Position northWest, WGS84Position southEast)
+		private void Convert(string file, string outputKapFileName, decimal lat0, decimal lon0, decimal lat1, decimal lon1)
 		{
 			const string PathImgKap = @"C:\Utility\imgkap\imgkap.exe";
-
-			var coord0 = northWest;
-			var coord1 = southEast;
-
-			var lat0 = coord0.Latitude;
-			var lon0 = coord0.Longitude;
-			var lat1 = coord1.Latitude;
-			var lon1 = coord1.Longitude;
-
-			var latCenter = (lat0 + lat1) / 2;
-			var lonFactor = Math.Cos(latCenter * (Math.PI / 180.0));
-			var imageWidthFactor = lonFactor / (Math.Abs(lat0 - lat1) / Math.Abs(lon1 - lon0));
 
 			var projection = "MERCATOR";
 

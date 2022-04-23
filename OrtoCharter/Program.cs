@@ -11,41 +11,108 @@ using static OrtoAnalyzer.Charter;
 
 namespace OrtoCharter
 {
-    class Program
-    {
+
+	class Job
+	{
+		public string Name { get; set; }
+		public decimal Lat0 { get; set; }
+		public decimal Lon0 { get; set; }
+		public decimal Lat1 { get; set; }
+		public decimal Lon1 { get; set; }
+
+		public bool Analyze { get; set; }
+
+		public decimal PartLat { get; set; } = 0.02m;
+		public decimal PartLon { get; set; } = 0.04m;
+
+		public MakeCharts MakeCharts { get; set; }
+	}
+
+	class MakeCharts
+	{
+		public decimal PixelsPerMeter { get; set; }
+		public FilterMode Filter { get; set; }
+	}
+
+	class Program
+	{
 		static CultureInfo IC = CultureInfo.InvariantCulture;
 
 		static int Main(string[] args)
 		{
-			// Parse command line for coordinates
-			double north, east, south, west;
-			try
+			List<Job> jobs = new List<Job>();
+			/*
+			jobs.Add(new Job
 			{
-				double lat0 = double.Parse(args[0], IC);
-				double lon0 = double.Parse(args[1], IC);
-				double lat1 = double.Parse(args[2], IC);
-				double lon1 = double.Parse(args[3], IC);
-
-				north = Math.Max(lat0, lat1);
-				east = Math.Max(lon0, lon1);
-				south = Math.Min(lat0, lat1);
-				west = Math.Min(lon0, lon1);
-			}
-			catch
+				Lat0 = 60.65225553880787m,
+				Lon0 = 17.576905151239853m,
+				Lat1 = 60.510789930297705m,
+				Lon1 = 17.793451993439962m,
+				MakeCharts = new MakeCharts
+				{
+					Filter = FilterMode.Subsurface,
+					PixelsPerMeter = 3
+				}
+			});
+			jobs.Add(new Job
 			{
-				Console.Error.WriteLine("Usage (coordinates in WGS84 decimal degrees): <lat0> <lon0> <lat1> <lon1> [/analyze] [/charts]");
-				return 1;
+				Lat0 = 60.65225553880787m,
+				Lon0 = 17.576905151239853m,
+				Lat1 = 60.510789930297705m,
+				Lon1 = 17.793451993439962m,
+				MakeCharts = new MakeCharts
+				{
+					Filter = FilterMode.Natural,
+					PixelsPerMeter = 0.5m
+				}
+			});
+			*/
+
+			var berga = new Job	{
+				Name = "Aakersberga",
+				Lat0 = 59.48218066640509m,
+				Lon0 = 18.279746957376734m,
+				Lat1 = 59.43938787152937m,
+				Lon1 = 18.38127909519303m,
+				MakeCharts = new MakeCharts
+				{
+					Filter = FilterMode.Natural,
+					PixelsPerMeter = 1
+				}
+			};
+			berga.PartLat *= 2;
+			berga.PartLon *= 2;
+
+			jobs.Add(berga);
+
+			// Run all jobs
+			foreach (var job in jobs)
+			{
+				RunJob(job);
 			}
 
-			const double PartLat = 0.02;
-			const double PartLon = PartLat * 2;
+			return 0;
+		}
+
+		static void RunJob(Job job)
+		{
+			// TODO: Refactor stuff...
+
+			// Get coordinates
+			decimal north = Math.Max(job.Lat0, job.Lat1);
+			decimal east = Math.Max(job.Lon0, job.Lon1);
+			decimal south = Math.Min(job.Lat0, job.Lat1);
+			decimal west = Math.Min(job.Lon0, job.Lon1);
+
+			decimal PartLat = job.PartLat;
+			decimal PartLon = job.PartLon;
 
 			// Make the area align on our grid
-			north = north + (PartLat - north % PartLat);
-			south = south - south % PartLat;
-			west = west - west % PartLon;
-			east = east + (PartLon - east % PartLon);
-			
+			north = OrtoDownloader.NearestUp(north, PartLat);
+			south = OrtoDownloader.NearestDown(south, PartLat);
+			west = OrtoDownloader.NearestDown(west, PartLon);
+			east = OrtoDownloader.NearestUp(east, PartLon);
+		
 			var pathMyDocuments = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
 			var pathOrtoCharter = Path.Combine(pathMyDocuments, "OrtoCharter");
 			Directory.CreateDirectory(pathOrtoCharter);
@@ -55,14 +122,14 @@ namespace OrtoCharter
 			Directory.CreateDirectory(downloadPath);
 
 			// Get bounding SWEREF 99 box
-			var northWest = new WGS84Position(north, west);
-			var southEast = new WGS84Position(south, east);
+			var northWest = new WGS84Position((double)north, (double)west);
+			var southEast = new WGS84Position((double)south, (double)east);
 			SweRefRegion sweRegion = OrtoDownloader.GetBoundingRegion(northWest, southEast);
 
 			downloader.Download(sweRegion, downloadPath);
 
 			// Analyze for rocks and other features?
-			if (args.Contains("/analyze"))
+			if (job.Analyze)
 			{
 				var analyzer = new OrtoAnalyzer.Analyzer(downloadPath);
 				const double CombineDistanceMeters = 20.0;
@@ -74,39 +141,32 @@ namespace OrtoCharter
 			}
 
 			// Make Chart files?
-			if (args.Contains("/charts"))
+			if (job.MakeCharts is MakeCharts makeCharts)
 			{
-				for (int i = 0; i < 2; i++)
+				var PixelsPerMeter = makeCharts.PixelsPerMeter;
+				var Filter = makeCharts.Filter;
+
+				string subFolderName = FormattableString.Invariant($"{job.Name}_{PixelsPerMeter}_{Filter}");
+
+				Console.Out.WriteLine("Creating Chart Group: " + subFolderName);
+
+				var outputPath = Path.Combine(pathOrtoCharter, "Charts");
+				using (var charter = new Charter(downloadPath, outputPath))
 				{
-					double PixelsPerMeter = i == 0 ? 0.5 : 3;
-					FilterMode Filter = i == 0 ? FilterMode.Natural : FilterMode.Subsurface;
-
-					string subFolderName = FormattableString.Invariant($"{PixelsPerMeter}_{Filter}");
-
-					Console.Out.WriteLine("Creating Chart Group: " + subFolderName);
-
-					var outputPath = Path.Combine(pathOrtoCharter, "Charts");
-					using (var charter = new Charter(downloadPath, outputPath))
+					// Build parts
+					for (var partNorth = north; partNorth > south; partNorth -= PartLat)
 					{
-						// Build parts
-						for (double partNorth = north; partNorth > south; partNorth = Math.Round(partNorth - PartLat, 5))
+						for (var partWest = west; partWest < east; partWest += PartLon)
 						{
-							for (double partWest = west; partWest < east; partWest = Math.Round(partWest + PartLon, 5))
-							{
-								double partSouth = partNorth - PartLat;
-								double partEast = partWest + PartLon;
+							var partSouth = partNorth - PartLat;
+							var partEast = partWest + PartLon;
 
-								var partNorthWest = new WGS84Position(partNorth, partWest);
-								var partSouthEast = new WGS84Position(partSouth, partEast);
-
-								charter.Create(partNorthWest, partSouthEast, subFolderName, PixelsPerMeter, Filter);
-							}
+							charter.Create(partNorth, partWest, partSouth, partEast, subFolderName, PixelsPerMeter, Filter);
 						}
 					}
 				}
 			}
 
-			return 0;
 		}
 
 		

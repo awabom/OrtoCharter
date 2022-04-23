@@ -52,15 +52,32 @@ namespace OrtoAnalyzer
 			return sweRegion;
 		}
 
+		public static decimal NearestDown(decimal value, decimal step)
+		{
+			return value - value % step;
+		}
+		public static decimal NearestUp(decimal value, decimal step)
+		{
+			return value + (step - value % step);
+		}
+		public static int NearestDown(int value, int step)
+		{
+			return value - value % step;
+		}
+		public static int NearestUp(int value, int step)
+		{
+			return value + (step - value % step);
+		}
+
 		public void Download(SweRefRegion region, string outputFolder)
 		{
 			WebClient webClient = new WebClient();
 
 			// Go to nearest 'BlockSize' for all coordinates - so downloader can reuse images for different overlapping regions
-			int north = (int)Math.Ceiling((decimal)region.North / BlockSize) * BlockSize;
-			int east = (int)Math.Ceiling((decimal)region.East / BlockSize) * BlockSize;
-			int south = (int)Math.Floor((decimal)region.South / BlockSize) * BlockSize;
-			int west = (int)Math.Floor((decimal)region.West / BlockSize) * BlockSize;
+			int north = NearestUp(region.North, BlockSize);
+			int east = NearestUp(region.East, BlockSize);
+			int south = NearestDown(region.South, BlockSize);
+			int west = NearestDown(region.West, BlockSize);
 
 			Console.Out.WriteLine("Downloading region: " + region);
 

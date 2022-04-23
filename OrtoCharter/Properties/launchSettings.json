@@ -1,8 +1,7 @@
 {
   "profiles": {
     "OrtoCharter": {
-      "commandName": "Project",
-      "commandLineArgs": "59.50962863409512 18.26446455783285 59.44670530230363 18.389420899868107 /charts"
+      "commandName": "Project"
     }
   }
 }
