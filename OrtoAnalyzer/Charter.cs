@@ -258,7 +258,7 @@ namespace OrtoAnalyzer
 		public enum PixelMode
         {
 			Nearest,
-			Lightest,
+			Red,
 			Mean
         }
 
@@ -442,20 +442,20 @@ namespace OrtoAnalyzer
 				var pixels = GetPixelsInArea(lat + latPerHalfPixel, lon - lonPerHalfPixel, lat - latPerHalfPixel, lon + lonPerHalfPixel);
 				return AverageRGB(pixels);
 			}
-			if (pixelMode == PixelMode.Lightest)
+			if (pixelMode == PixelMode.Red)
             {
 				var pixels = GetPixelsInArea(lat + latPerHalfPixel, lon - lonPerHalfPixel, lat - latPerHalfPixel, lon + lonPerHalfPixel);
 				Color? result = null;
-				float lightestBrightness = 0;
+				byte mostRedValue = 0;
 
 				foreach (var checkColor in pixels)
 				{ 
-					float checkBrightness = checkColor.GetBrightness();
+					byte checkRed = checkColor.R;
 
-					if (result == null || checkBrightness > lightestBrightness)
+					if (result == null || checkRed > mostRedValue)
                     {
 						result = checkColor;
-						lightestBrightness = checkBrightness;
+						mostRedValue = checkRed;
                     }
 	             }
 
