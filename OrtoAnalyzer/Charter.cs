@@ -148,12 +148,39 @@ namespace OrtoAnalyzer
 				region.East > pos99.Longitude;
         }
 
-		ThreadLocal<ImageItem> localMatch = new ThreadLocal<ImageItem>();
-
-		public Color? GetPixel(WGS84Position position)
+		internal Color? GetPixel(WGS84Position position)
 		{
 			SWEREF99Position pos99 = new SWEREF99Position(position, SWEREF99Position.SWEREFProjection.sweref_99_tm);
+			return GetPixel(pos99);
+		}
 
+		internal IEnumerable<Color> GetPixelsInArea(WGS84Position pos1, WGS84Position pos2)
+		{
+			const double StepPerPixel = 0.25;
+			SWEREF99Position pos99_1 = new SWEREF99Position(pos1, SWEREF99Position.SWEREFProjection.sweref_99_tm);
+			SWEREF99Position pos99_2 = new SWEREF99Position(pos2, SWEREF99Position.SWEREFProjection.sweref_99_tm);
+
+			var lowLat = pos99_2.Latitude;
+			var highLat = pos99_1.Latitude;
+			var lowLon = pos99_1.Longitude;
+			var highLon = pos99_2.Longitude;
+
+			SWEREF99Position pos99 = new SWEREF99Position(lowLat, lowLon);
+
+			for (; pos99.Latitude <= highLat; pos99.Latitude += StepPerPixel)
+			{ 
+				for (pos99.Longitude = lowLon; pos99.Longitude <= highLon; pos99.Longitude += StepPerPixel)
+				{
+					var pixel = GetPixel(pos99);
+					if (pixel != null)
+						yield return pixel.Value;
+				}
+			}
+		}
+
+		ThreadLocal<ImageItem> localMatch = new ThreadLocal<ImageItem>();
+		private Color? GetPixel(SWEREF99Position pos99)
+		{ 
 			// Get the correct block image for this position
 			var match = localMatch.Value;
 			if (match == null || !ContainsPosition(match.Region, pos99))
@@ -193,7 +220,7 @@ namespace OrtoAnalyzer
 			}
 			_images.Clear();
 		}
-	}
+    }
 
 	public class Charter : IDisposable
 	{
@@ -224,13 +251,15 @@ namespace OrtoAnalyzer
 		public enum FilterMode
 		{
 			Natural,
-			Subsurface
+			Subsurface,
+			Subsurface2
 		}
 
 		public enum PixelMode
         {
 			Nearest,
-			Lightest
+			Lightest,
+			Mean
         }
 
 		public class ImageRegion
@@ -319,7 +348,7 @@ namespace OrtoAnalyzer
 				int x2excl = imageRegion.x2excl;
 				int y2excl = imageRegion.y2excl;
 
-				Parallel.For(imageRegion.y1, y2excl, y =>
+                Parallel.For(imageRegion.y1, y2excl, y =>
 				//for (int y = imageRegion.y1; y < y2excl; y++)
 				{
 					var lat = lat0 - latPerPixel * y;
@@ -330,38 +359,48 @@ namespace OrtoAnalyzer
 
 						Color? color = GetPixel(lat, lon, pixelMode, latPerHalfPixel, lonPerHalfPixel);
 						if (color != null)
-						{
-							var value = color.Value;
+                        {
+                            var value = color.Value;
 
-							byte red = value.R;
-							byte green = value.G;
-							byte blue = value.B;
+                            byte red = value.R;
+                            byte green = value.G;
+                            byte blue = value.B;
 
-							const int HighLevel = 80;
-							const int HighLevelSmudge = 5;
-
-							// Always create fewer colors in the light pixels (had some palette issues with imgkap before this)
-							if (red > HighLevel && green > HighLevel && blue > HighLevel)
-							{
-								red -= (byte)(red % HighLevelSmudge);
-								green -= (byte)(green % HighLevelSmudge);
-								blue -= (byte)(blue % HighLevelSmudge);
-							}
-
+                            int highLevel;
+                            int highLevelSmudge;
+					
 							// Subsurface: Raise red, green - lower blue
-							if (filterMode == FilterMode.Subsurface)
-							{
+							if (filterMode == FilterMode.Subsurface || filterMode == FilterMode.Subsurface2)
+                            {
+								highLevel = 80;
+								highLevelSmudge = 8;
+
 								red = ToByte(red * 2.5);
-								green = ToByte(green * 1.5);
-								blue = ToByte(blue * 0.5);
-							}
+                                green = ToByte(green * 1.5);
+                                blue = ToByte(blue * 0.5);
+
+                                if (filterMode == FilterMode.Subsurface2)
+                                {
+                                    if (red < 50) // Everything with red less than 50 is 'safe'
+                                    {
+                                        red = green = blue = 0;
+                                    }
+                                }
+                            }
+                            else
+                            {
+								highLevel = 0;
+								highLevelSmudge = 3;
+                            }
+
+							LowerColors(ref red, ref green, ref blue, highLevel, highLevelSmudge);
 
 							int pixelStart = y * stride + 3 * x;
-							bytes[pixelStart + 2] = red;
-							bytes[pixelStart + 1] = green;
-							bytes[pixelStart] = blue;
-						}
-					}
+                            bytes[pixelStart + 2] = red;
+                            bytes[pixelStart + 1] = green;
+                            bytes[pixelStart] = blue;
+                        }
+                    }
 				}
 				);
 
@@ -381,63 +420,81 @@ namespace OrtoAnalyzer
 			// TODO ENABLE File.Delete(tempImage);
 		}
 
-		struct LatLon
+        private static void LowerColors(ref byte red, ref byte green, ref byte blue, int HighLevel, int HighLevelSmudge)
         {
-			public decimal Lat;
-			public decimal Lon;
+            // Always create fewer colors in the light pixels (had some palette issues with imgkap before this)
+            if (red > HighLevel && green > HighLevel && blue > HighLevel)
+            {
+                red -= (byte)(red % HighLevelSmudge);
+                green -= (byte)(green % HighLevelSmudge);
+                blue -= (byte)(blue % HighLevelSmudge);
+            }
         }
 
-		private Color? GetPixel(decimal lat, decimal lon, PixelMode pixelMode, decimal latPerHalfPixel, decimal lonPerHalfPixel)
+        private Color? GetPixel(decimal lat, decimal lon, PixelMode pixelMode, decimal latPerHalfPixel, decimal lonPerHalfPixel)
         {
 			if (pixelMode == PixelMode.Nearest)
 			{
 				return GetPixelSingle(lat, lon);
 			}
+			if (pixelMode == PixelMode.Mean)
+            {
+				var pixels = GetPixelsInArea(lat + latPerHalfPixel, lon - lonPerHalfPixel, lat - latPerHalfPixel, lon + lonPerHalfPixel);
+				return AverageRGB(pixels);
+			}
 			if (pixelMode == PixelMode.Lightest)
             {
-				Color? lightest = null;
+				var pixels = GetPixelsInArea(lat + latPerHalfPixel, lon - lonPerHalfPixel, lat - latPerHalfPixel, lon + lonPerHalfPixel);
+				Color? result = null;
 				float lightestBrightness = 0;
 
-				var checkCoords = new LatLon[] { 
-					new LatLon() { Lat = lat - latPerHalfPixel, Lon = lon - lonPerHalfPixel },
-					new LatLon() { Lat = lat - latPerHalfPixel, Lon = lon },
-					new LatLon() { Lat = lat - latPerHalfPixel, Lon = lon + lonPerHalfPixel },
-					new LatLon() { Lat = lat, Lon = lon - lonPerHalfPixel },
-					new LatLon() { Lat = lat, Lon = lon },
-					new LatLon() { Lat = lat, Lon = lon + lonPerHalfPixel },
-					new LatLon() { Lat = lat + latPerHalfPixel, Lon = lon - lonPerHalfPixel },
-					new LatLon() { Lat = lat + latPerHalfPixel, Lon = lon },
-					new LatLon() { Lat = lat + latPerHalfPixel, Lon = lon + lonPerHalfPixel },
-				};
+				foreach (var checkColor in pixels)
+				{ 
+					float checkBrightness = checkColor.GetBrightness();
 
-				foreach (var checkCoord in checkCoords)
-                {
-					Color? checkColor = GetPixelSingle(checkCoord.Lat, checkCoord.Lon);
-					if (checkColor == null)
-						continue;
-
-					float checkBrightness = checkColor.Value.GetBrightness();
-
-					if (lightest == null || checkBrightness > lightestBrightness)
+					if (result == null || checkBrightness > lightestBrightness)
                     {
-						lightest = checkColor;
+						result = checkColor;
 						lightestBrightness = checkBrightness;
                     }
 	             }
 
-				return lightest;
+				return result;
 
             }
 			throw new NotImplementedException("PixelMode not implenented: " + pixelMode);
 		}
+
+        private static Color? AverageRGB(IEnumerable<Color> pixels)
+        {
+			int num = 0;
+			int rs = 0, gs = 0, bs = 0;
+			foreach (var color in pixels)
+            {
+				num++;
+
+				rs += color.R * color.R;
+				gs += color.G * color.G;
+				bs += color.B * color.B;
+			}
+
+			return num == 0 ? null : Color.FromArgb((int)Math.Sqrt(rs/num), (int)Math.Sqrt(gs/num), (int)Math.Sqrt(bs/num));
+        }
 
         private Color? GetPixelSingle(decimal lat, decimal lon)
         {
             WGS84Position position = new WGS84Position((double)lat, (double)lon);
             return _imageCache.GetPixel(position);
         }
+		private IEnumerable<Color> GetPixelsInArea(decimal lat0, decimal lon0, decimal lat1, decimal lon1)
+        {
+			WGS84Position pos1 = new WGS84Position((double)lat0, (double)lon0);
+			WGS84Position pos2 = new WGS84Position((double)lat1, (double)lon1);
+			return _imageCache.GetPixelsInArea(pos1, pos2);
+        }
 
-        private byte ToByte(double d)
+
+		private byte ToByte(double d)
 		{
 			var round = Math.Round(d);
 

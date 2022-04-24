@@ -32,7 +32,7 @@ namespace OrtoCharter
 	{
 		public decimal PixelsPerMeter { get; set; } = 1;
 		public FilterMode Filter { get; set; } = FilterMode.Natural;
-		public PixelMode PixelMode { get; set; } = PixelMode.Nearest;
+		public PixelMode PixelMode { get; set; } = PixelMode.Mean;
 	}
 
 	class Program
@@ -43,7 +43,6 @@ namespace OrtoCharter
 		{
 			List<Job> jobs = new List<Job>();
 			
-			/*
 			jobs.Add(new Job
 			{
 				Name = "East",
@@ -53,9 +52,9 @@ namespace OrtoCharter
 				Lon1 = 17.793451993439962m,
 				MakeCharts = new MakeCharts
 				{
-					Filter = FilterMode.Subsurface,
+					Filter = FilterMode.Subsurface2,
 					PixelsPerMeter = 2,
-					PixelMode = PixelMode.Lightest
+					PixelMode = PixelMode.Mean
 				}
 			});
 
@@ -76,14 +75,13 @@ namespace OrtoCharter
 			east2.PartLon *= 4;
 
 			jobs.Add(east2);
-			*/
 
 			var berga = new Job	{
 				Name = "Aakersberga",
-				Lat0 = 59.48218066640509m,
-				Lon0 = 18.279746957376734m,
-				Lat1 = 59.43938787152937m,
-				Lon1 = 18.38127909519303m,
+				Lat0 = 59.6m,
+				Lon0 = 18.2m,
+				Lat1 = 59.3m,
+				Lon1 = 18.4m,
 				MakeCharts = new MakeCharts
 				{
 					Filter = FilterMode.Natural,
