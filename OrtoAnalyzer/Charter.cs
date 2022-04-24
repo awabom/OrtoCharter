@@ -1,142 +1,180 @@
-﻿using System;
+﻿using MightyLittleGeodesy.Positions;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
-using MightyLittleGeodesy.Positions;
-using Shorthand.Geodesy;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace OrtoAnalyzer
 {
-	class ImageItem : IDisposable
+	class MemoryImage
+    {
+		readonly byte[] _bytes;
+		readonly int _rowSize;
+		const int BytesPerPixel = 4;
+
+		const int A = 3;
+		const int R = 2;
+		const int G = 1;
+		const int B = 0;
+
+		public MemoryImage(byte[] bytes, int rowSize, int width, int height)
+        {
+			_bytes = bytes;
+			_rowSize = rowSize;
+			Width = width;
+			Height = height;
+        }
+
+		public int Width { get; }
+		public int Height { get; }
+
+		public Color GetPixel(int x, int y)
+        {
+			int offset = y * _rowSize + x * BytesPerPixel;
+			return Color.FromArgb(_bytes[offset + A], _bytes[offset + R], _bytes[offset + G], _bytes[offset + B]);
+        }
+    }
+
+    class ImageItem : IDisposable
 	{
+		const double WidthHeight = 4000;
+
 		public SweRefRegion Region { get; }
+		public string FileName { get; }
 
-		Bitmap _image;
-		public Bitmap Image
-		{
-			get
-			{
-				LoadImage();
-				return _image;
-			}
-		}
-
-		private int? _imageWidth;
-		public int ImageWidth
-		{
-			get
-			{
-				if (_imageWidth == null)
-					LoadImage();
-				return _imageWidth.Value;
-			}
-		}
-		private int? _imageHeight;
-		public int ImageHeight
-		{
-			get
-			{
-				if (_imageHeight == null)
-					LoadImage();
-				return _imageHeight.Value;
-			}
-		}
-
-		private void LoadImage()
-		{
-			if (_image == null)
-			{
-				//Console.Out.WriteLine("Loading image: " + FileName);
-				_image = new Bitmap(System.Drawing.Image.FromFile(FileName));
-				_imageHeight = _image.Height;
-				_imageWidth = _image.Width;
-			}
-		}
-
-		public void FreeImage()
-		{
-			_image?.Dispose();
-			_image = null;
-		}
-
-		public string FileName { get; private set; }
-
-		public void Dispose()
-		{
-			FreeImage();
-		}
+		public double LonFactor { get; }
+		public double LatFactor { get; }
 
 		public ImageItem(SweRefRegion region, string fileName)
 		{
 			Region = region;
 			FileName = fileName;
+
+			LonFactor = WidthHeight / (Region.East - Region.West);
+			LatFactor = WidthHeight / (Region.North - Region.South);
+
+			ResetImage();
+		}
+
+		Lazy<MemoryImage> _image;
+
+		private void ResetImage()
+        {
+			_image = new Lazy<MemoryImage>(() => LoadImage(FileName));
+        }
+
+		public MemoryImage Image
+		{
+			get
+			{
+				return _image.Value;
+			}
+		}
+
+
+
+		private static MemoryImage LoadImage(string fileName)
+		{
+			Console.Out.WriteLine("Loading image: " + fileName);
+			using (var bitmap = new Bitmap(System.Drawing.Image.FromFile(fileName)))
+			{
+				var imageHeight = bitmap.Height;
+				var imageWidth = bitmap.Width;
+
+				if (imageHeight != WidthHeight || imageWidth != WidthHeight)
+                {
+					throw new Exception("Image is not square with size: " + WidthHeight);
+                }
+
+				var bitmapData = bitmap.LockBits(new Rectangle(0, 0, imageWidth, imageHeight), System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+				int rowSize = Math.Abs(bitmapData.Stride);
+				var data = new byte[imageHeight * rowSize];
+				var ptr = bitmapData.Scan0;
+				var rowIndex = 0;
+
+				for (int y = 0; y < imageHeight; y++)
+				{
+					Marshal.Copy(ptr, data, rowIndex, rowSize);
+					ptr = IntPtr.Add(ptr, bitmapData.Stride);
+					rowIndex += rowSize;
+				}
+				bitmap.UnlockBits(bitmapData);
+
+				return new MemoryImage(data, rowSize, imageWidth, imageHeight);
+			}
+		}
+
+		public void FreeImage()
+		{
+			if (_image.IsValueCreated)
+			{
+				Console.Out.WriteLine("Freeing image: " + FileName);
+			}
+			ResetImage();
+		}
+
+		public void Dispose()
+		{
+			// Nothing to do here anymore - keeping in case we need it again
 		}
 	}
 	class ImageCache : IDisposable
 	{
-		List<ImageItem> Images { get; set; } = new List<ImageItem>();
+		List<ImageItem> _images = new List<ImageItem>();
 
 		public void AddImage(ImageItem image)
 		{
-			Images.Add(image);
+			_images.Add(image);
 		}
+		public void FreeAll()
+        {
+			foreach (var image in _images)
+            {
+				image.FreeImage();
+            }
+        }
 
-		List<ImageItem> loadedImages = new List<ImageItem>();
+		private static bool ContainsPosition(SweRefRegion region, SWEREF99Position pos99)
+        {
+			return region.North >= pos99.Latitude &&
+				region.South < pos99.Latitude &&
+				region.West <= pos99.Longitude &&
+				region.East > pos99.Longitude;
+        }
 
-		private static bool RegionContainsPosition(SweRefRegion region, SWEREF99Position pos99)
-		{
-			return region.North >= pos99.Latitude
-				&& region.South < pos99.Latitude
-				&& region.West <= pos99.Longitude
-				&& region.East > pos99.Longitude;
-		}
+		ThreadLocal<ImageItem> localMatch = new ThreadLocal<ImageItem>();
 
-		ImageItem match = null;
 		public Color? GetPixel(WGS84Position position)
 		{
 			SWEREF99Position pos99 = new SWEREF99Position(position, SWEREF99Position.SWEREFProjection.sweref_99_tm);
 
-			if (match == null || !RegionContainsPosition(match.Region, pos99))
+			// Get the correct block image for this position
+			var match = localMatch.Value;
+			if (match == null || !ContainsPosition(match.Region, pos99))
 			{
-				match = Images.FirstOrDefault(checkImage => RegionContainsPosition(checkImage.Region, pos99));
-			}
-
-			if (match == null)
-			{
-				return null;
-			}
-
-			// Handle cache size (remove images if too large)
-			if (loadedImages.LastOrDefault() != match)
-			{
-				if (loadedImages.Contains(match))
+				match = _images.FirstOrDefault(x => ContainsPosition(x.Region, pos99));
+				if (match == null)
 				{
-					loadedImages.Remove(match);
+					throw new Exception("Source image not found");
 				}
-				loadedImages.Add(match);
-
-				while (loadedImages.Count > 25)
-				{
-					//Console.Out.WriteLine("Removing from cache: " + loadedImages[0].FileName);
-					loadedImages[0].FreeImage();
-					loadedImages.RemoveAt(0);
-				}
+				localMatch.Value = match;
 			}
 
 			// Get the pixel for this position from the source image
 			var dLon = pos99.Longitude - match.Region.West;
 			var dLat = match.Region.North - pos99.Latitude;
-			var regionHeight = match.Region.North - match.Region.South;
-			var regionWidth = match.Region.East - match.Region.West;
 
-			var x = (int)(dLon / regionWidth * match.ImageWidth);
-			var y = (int)(dLat / regionHeight * match.ImageHeight);
+			var x = (int)(dLon * match.LonFactor);
+			var y = (int)(dLat * match.LatFactor);
 
 			// Check that the coordinate is valid
-			Debug.Assert(!(x < 0 || x >= match.ImageWidth || y < 0 || y >= match.ImageHeight));
+			Debug.Assert(!(x < 0 || x >= match.Image.Width || y < 0 || y >= match.Image.Height));
 
 			var sourcePixel = match.Image.GetPixel(x, y);
 			if (sourcePixel.A == 0)
@@ -149,8 +187,11 @@ namespace OrtoAnalyzer
 
 		public void Dispose()
 		{
-			Images.ForEach(x => x.Dispose());
-			Images.Clear();
+			foreach (var image in _images)
+			{
+				image.Dispose();
+			}
+			_images.Clear();
 		}
 	}
 
@@ -168,9 +209,6 @@ namespace OrtoAnalyzer
 
 		private void Load()
 		{
-			if (_imageCache != null)
-				return;
-
 			_imageCache = new ImageCache();
 
 			// Build source map
@@ -189,11 +227,46 @@ namespace OrtoAnalyzer
 			Subsurface
 		}
 
-		public void Create(decimal lat0, decimal lon0, decimal lat1, decimal lon1, string subFolderName, decimal pixelsPerMeter, FilterMode filterMode)
+		public enum PixelMode
+        {
+			Nearest,
+			Lightest
+        }
+
+		public class ImageRegion
 		{
-			string subFolderPath = Path.Combine(outputPath, subFolderName);
+			public int x1;
+			public int x2excl;
+			public int y1;
+			public int y2excl;
+
+			public override string ToString()
+			{
+				return FormattableString.Invariant($"({x1}, {y1}) - ({x2excl}, {y2excl})");
+			}
+
+			public static IEnumerable<ImageRegion> GetRegions(int totalWidth, int totalHeight, int partWidth, int partHeight)
+			{
+				for (int y = 0; y < totalHeight; y += partHeight)
+				{
+					for (int x = 0; x < totalWidth; x += partWidth)
+					{
+						int x2excl = x + partWidth;
+						if (x2excl > totalWidth) x2excl = totalWidth;
+						int y2excl = y + partHeight;
+						if (y2excl > totalHeight) y2excl = totalHeight;
+
+						yield return new ImageRegion { x1 = x, y1 = y, x2excl = x2excl, y2excl = y2excl };
+					}
+				}
+			}
+		}
+
+		public void Create(decimal lat0, decimal lon0, decimal lat1, decimal lon1, string groupName, decimal pixelsPerMeter, FilterMode filterMode, PixelMode pixelMode)
+		{
+			string subFolderPath = Path.Combine(outputPath, groupName);
 			Directory.CreateDirectory(subFolderPath);
-			string name = FormattableString.Invariant($"{lat0:0.##########}_{lon0:0.##########}_{lat1:0.##########}_{lon1:0.##########}.kap");
+			string name = FormattableString.Invariant($"{groupName}_{lat0:0.##########}_{lon0:0.##########}_{lat1:0.##########}_{lon1:0.##########}.kap");
 			string fileNameKap = Path.Combine(subFolderPath, name);
 
 			if (File.Exists(fileNameKap))
@@ -231,53 +304,72 @@ namespace OrtoAnalyzer
 
 			Console.Out.WriteLine("Building chart: " + fileNameKap);
 
-			var dLatHeight = dLat / height;
-			var dLonWidth = dLon / width;
+			var latPerPixel = dLat / height;
+			var lonPerPixel = dLon / width;
+			var latPerHalfPixel = latPerPixel / 2;
+			var lonPerHalfPixel = lonPerPixel / 2;
 
-			for (int x = 0; x < width; x++)
+			var partWidth = (int)Math.Round(1.2m * width * (pixelsPerMeter / 4));
+			var partHeight = (int)Math.Round(1.2m * height * (pixelsPerMeter / 4));
+
+			var imageRegions = ImageRegion.GetRegions(width, height, partWidth, partHeight);
+
+			foreach (var imageRegion in imageRegions)
 			{
-				for (int y = 0; y < height; y++)
+				int x2excl = imageRegion.x2excl;
+				int y2excl = imageRegion.y2excl;
+
+				Parallel.For(imageRegion.y1, y2excl, y =>
+				//for (int y = imageRegion.y1; y < y2excl; y++)
 				{
-					var lat = lat0 - dLatHeight * y;
-					var lon = lon0 + dLonWidth * x;
-					WGS84Position position = new WGS84Position((double)lat, (double)lon);
-					var color = _imageCache.GetPixel(position);
-					if (color != null)
+					var lat = lat0 - latPerPixel * y;
+
+					for (int x = imageRegion.x1; x < x2excl; x++)
 					{
-						var value = color.Value;
+						var lon = lon0 + lonPerPixel * x;
 
-						byte red = value.R;
-						byte green = value.G;
-						byte blue = value.B;
-
-						const int HighLevel = 80;
-						const int HighLevelSmudge = 5;
-
-						// Always create fewer colors in the light pixels (had some palette issues with imgkap before this)
-						if (red > HighLevel && green > HighLevel && blue > HighLevel)
+						Color? color = GetPixel(lat, lon, pixelMode, latPerHalfPixel, lonPerHalfPixel);
+						if (color != null)
 						{
-							red -= (byte)(red % HighLevelSmudge);
-							green -= (byte)(green % HighLevelSmudge);
-							blue -= (byte)(blue % HighLevelSmudge);
-						}
+							var value = color.Value;
 
-						// Subsurface: Raise red, green - lower blue
-						if (filterMode == FilterMode.Subsurface)
-						{
-							red = ToByte(red * 2.5);
-							green = ToByte(green * 1.5);
-							blue = ToByte(blue * 0.5);
-						}
+							byte red = value.R;
+							byte green = value.G;
+							byte blue = value.B;
 
-						int pixelStart = y * stride + 3 * x;
-						bytes[pixelStart + 2] = red;
-						bytes[pixelStart + 1] = green;
-						bytes[pixelStart] = blue;
+							const int HighLevel = 80;
+							const int HighLevelSmudge = 5;
+
+							// Always create fewer colors in the light pixels (had some palette issues with imgkap before this)
+							if (red > HighLevel && green > HighLevel && blue > HighLevel)
+							{
+								red -= (byte)(red % HighLevelSmudge);
+								green -= (byte)(green % HighLevelSmudge);
+								blue -= (byte)(blue % HighLevelSmudge);
+							}
+
+							// Subsurface: Raise red, green - lower blue
+							if (filterMode == FilterMode.Subsurface)
+							{
+								red = ToByte(red * 2.5);
+								green = ToByte(green * 1.5);
+								blue = ToByte(blue * 0.5);
+							}
+
+							int pixelStart = y * stride + 3 * x;
+							bytes[pixelStart + 2] = red;
+							bytes[pixelStart + 1] = green;
+							bytes[pixelStart] = blue;
+						}
 					}
 				}
+				);
+
+				// Free any images used when making this chart region/part
+				_imageCache.FreeAll();
 			}
 
-			System.Runtime.InteropServices.Marshal.Copy(bytes, 0, bitmapBits.Scan0, bytes.Length);
+			Marshal.Copy(bytes, 0, bitmapBits.Scan0, bytes.Length);
 			bitmap.UnlockBits(bitmapBits);
 
 			bitmap.Save(tempImage);
@@ -289,7 +381,63 @@ namespace OrtoAnalyzer
 			// TODO ENABLE File.Delete(tempImage);
 		}
 
-		private byte ToByte(double d)
+		struct LatLon
+        {
+			public decimal Lat;
+			public decimal Lon;
+        }
+
+		private Color? GetPixel(decimal lat, decimal lon, PixelMode pixelMode, decimal latPerHalfPixel, decimal lonPerHalfPixel)
+        {
+			if (pixelMode == PixelMode.Nearest)
+			{
+				return GetPixelSingle(lat, lon);
+			}
+			if (pixelMode == PixelMode.Lightest)
+            {
+				Color? lightest = null;
+				float lightestBrightness = 0;
+
+				var checkCoords = new LatLon[] { 
+					new LatLon() { Lat = lat - latPerHalfPixel, Lon = lon - lonPerHalfPixel },
+					new LatLon() { Lat = lat - latPerHalfPixel, Lon = lon },
+					new LatLon() { Lat = lat - latPerHalfPixel, Lon = lon + lonPerHalfPixel },
+					new LatLon() { Lat = lat, Lon = lon - lonPerHalfPixel },
+					new LatLon() { Lat = lat, Lon = lon },
+					new LatLon() { Lat = lat, Lon = lon + lonPerHalfPixel },
+					new LatLon() { Lat = lat + latPerHalfPixel, Lon = lon - lonPerHalfPixel },
+					new LatLon() { Lat = lat + latPerHalfPixel, Lon = lon },
+					new LatLon() { Lat = lat + latPerHalfPixel, Lon = lon + lonPerHalfPixel },
+				};
+
+				foreach (var checkCoord in checkCoords)
+                {
+					Color? checkColor = GetPixelSingle(checkCoord.Lat, checkCoord.Lon);
+					if (checkColor == null)
+						continue;
+
+					float checkBrightness = checkColor.Value.GetBrightness();
+
+					if (lightest == null || checkBrightness > lightestBrightness)
+                    {
+						lightest = checkColor;
+						lightestBrightness = checkBrightness;
+                    }
+	             }
+
+				return lightest;
+
+            }
+			throw new NotImplementedException("PixelMode not implenented: " + pixelMode);
+		}
+
+        private Color? GetPixelSingle(decimal lat, decimal lon)
+        {
+            WGS84Position position = new WGS84Position((double)lat, (double)lon);
+            return _imageCache.GetPixel(position);
+        }
+
+        private byte ToByte(double d)
 		{
 			var round = Math.Round(d);
 

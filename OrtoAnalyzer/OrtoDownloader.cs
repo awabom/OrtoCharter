@@ -58,7 +58,8 @@ namespace OrtoAnalyzer
 		}
 		public static decimal NearestUp(decimal value, decimal step)
 		{
-			return value + (step - value % step);
+			var diff = value % step;
+			return diff == 0 ? value : value + (step - diff);
 		}
 		public static int NearestDown(int value, int step)
 		{
@@ -66,7 +67,8 @@ namespace OrtoAnalyzer
 		}
 		public static int NearestUp(int value, int step)
 		{
-			return value + (step - value % step);
+			var diff = value % step;
+			return diff == 0 ? value : value + (step - diff);
 		}
 
 		public void Download(SweRefRegion region, string outputFolder)
@@ -120,7 +122,12 @@ namespace OrtoAnalyzer
 
 		private static string GetFileNameFromSWEREF(SweRefRegion region)
 		{
-			return region.West.ToString(IC) + SplitChar + region.South.ToString(IC) + SplitChar + region.East.ToString(IC) + SplitChar + region.North.ToString(IC) + ".png";
+			return GetFileNameFromSWEREF(region.North, region.West, region.South, region.East);
+		}
+
+		private static string GetFileNameFromSWEREF(int north, int west, int south, int east) 
+		{ 
+			return FormattableString.Invariant($"{west}{SplitChar}{south}{SplitChar}{east}{SplitChar}{north}.png");
 		}
 
 		public static SweRefRegion ParseFileNameToSWEREF(string fileName)

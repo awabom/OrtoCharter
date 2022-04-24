@@ -30,8 +30,9 @@ namespace OrtoCharter
 
 	class MakeCharts
 	{
-		public decimal PixelsPerMeter { get; set; }
-		public FilterMode Filter { get; set; }
+		public decimal PixelsPerMeter { get; set; } = 1;
+		public FilterMode Filter { get; set; } = FilterMode.Natural;
+		public PixelMode PixelMode { get; set; } = PixelMode.Nearest;
 	}
 
 	class Program
@@ -41,9 +42,11 @@ namespace OrtoCharter
 		static int Main(string[] args)
 		{
 			List<Job> jobs = new List<Job>();
+			
 			/*
 			jobs.Add(new Job
 			{
+				Name = "East",
 				Lat0 = 60.65225553880787m,
 				Lon0 = 17.576905151239853m,
 				Lat1 = 60.510789930297705m,
@@ -51,11 +54,14 @@ namespace OrtoCharter
 				MakeCharts = new MakeCharts
 				{
 					Filter = FilterMode.Subsurface,
-					PixelsPerMeter = 3
+					PixelsPerMeter = 2,
+					PixelMode = PixelMode.Lightest
 				}
 			});
-			jobs.Add(new Job
+
+			var east2 = new Job
 			{
+				Name = "East",
 				Lat0 = 60.65225553880787m,
 				Lon0 = 17.576905151239853m,
 				Lat1 = 60.510789930297705m,
@@ -65,7 +71,11 @@ namespace OrtoCharter
 					Filter = FilterMode.Natural,
 					PixelsPerMeter = 0.5m
 				}
-			});
+			};
+			east2.PartLat *= 4;
+			east2.PartLon *= 4;
+
+			jobs.Add(east2);
 			*/
 
 			var berga = new Job	{
@@ -112,11 +122,12 @@ namespace OrtoCharter
 			south = OrtoDownloader.NearestDown(south, PartLat);
 			west = OrtoDownloader.NearestDown(west, PartLon);
 			east = OrtoDownloader.NearestUp(east, PartLon);
-		
+
+			/*
 			var pathMyDocuments = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
 			var pathOrtoCharter = Path.Combine(pathMyDocuments, "OrtoCharter");
-			Directory.CreateDirectory(pathOrtoCharter);
-
+			*/
+			var pathOrtoCharter = @"P:\OrtoCharter";
 			var downloader = new OrtoDownloader();
 			string downloadPath = Path.Combine(pathOrtoCharter, "Download");
 			Directory.CreateDirectory(downloadPath);
@@ -145,10 +156,11 @@ namespace OrtoCharter
 			{
 				var PixelsPerMeter = makeCharts.PixelsPerMeter;
 				var Filter = makeCharts.Filter;
+				var PixelMode = makeCharts.PixelMode;
 
-				string subFolderName = FormattableString.Invariant($"{job.Name}_{PixelsPerMeter}_{Filter}");
+				string groupName = FormattableString.Invariant($"{job.Name}_{PixelsPerMeter}_{PixelMode}_{Filter}");
 
-				Console.Out.WriteLine("Creating Chart Group: " + subFolderName);
+				Console.Out.WriteLine("Creating Chart Group: " + groupName);
 
 				var outputPath = Path.Combine(pathOrtoCharter, "Charts");
 				using (var charter = new Charter(downloadPath, outputPath))
@@ -161,7 +173,7 @@ namespace OrtoCharter
 							var partSouth = partNorth - PartLat;
 							var partEast = partWest + PartLon;
 
-							charter.Create(partNorth, partWest, partSouth, partEast, subFolderName, PixelsPerMeter, Filter);
+							charter.Create(partNorth, partWest, partSouth, partEast, groupName, PixelsPerMeter, Filter, PixelMode);
 						}
 					}
 				}
